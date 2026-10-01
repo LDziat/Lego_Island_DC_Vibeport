@@ -1,0 +1,453 @@
+#include "extensions/siloader.h"
+
+#include "extensions/common/pathutils.h"
+#include "legovideomanager.h"
+#include "misc.h"
+#include "mxdsaction.h"
+#include "mxmisc.h"
+#include "mxstreamer.h"
+
+#include <SDL/SDL.h>
+#include "compat.h"
+#include <interleaf.h>
+
+using namespace Extensions;
+
+const char prependedMarker[] = ";;prepended;;";
+
+std::map<std::string, std::string> SiLoaderExt::options;
+std::vector<std::string> SiLoaderExt::files;
+std::vector<std::string> SiLoaderExt::directives;
+std::vector<std::pair<SiLoaderExt::StreamObject, SiLoaderExt::StreamObject>> SiLoaderExt::startWith;
+std::vector<std::pair<SiLoaderExt::StreamObject, SiLoaderExt::StreamObject>> SiLoaderExt::removeWith;
+std::vector<std::pair<SiLoaderExt::StreamObject, SiLoaderExt::StreamObject>> SiLoaderExt::enableWith;
+std::vector<std::pair<SiLoaderExt::StreamObject, SiLoaderExt::StreamObject>> SiLoaderExt::replace;
+std::vector<std::pair<SiLoaderExt::StreamObject, SiLoaderExt::StreamObject>> SiLoaderExt::prepend;
+std::vector<SiLoaderExt::StreamObject> SiLoaderExt::fullScreenMovie;
+std::vector<SiLoaderExt::StreamObject> SiLoaderExt::disable3d;
+std::vector<SiLoaderExt::StreamObject> SiLoaderExt::firedPrepend;
+bool SiLoaderExt::enabled = false;
+
+void SiLoaderExt::Initialize()
+{
+	char* files = SDL_strdup(options["si loader:files"].c_str());
+	char* saveptr;
+
+	for (char* file = SDL_strtok_r(files, ",\n\r ", &saveptr); file; file = SDL_strtok_r(nullptr, ",\n\r ", &saveptr)) {
+		SiLoaderExt::files.emplace_back(file);
+	}
+
+	char* directives = SDL_strdup(options["si loader:directives"].c_str());
+
+	for (char* directive = SDL_strtok_r(directives, ",\n\r ", &saveptr); directive;
+		 directive = SDL_strtok_r(nullptr, ",\n\r ", &saveptr)) {
+		SiLoaderExt::directives.emplace_back(directive);
+	}
+
+	SDL_free(files);
+	SDL_free(directives);
+}
+
+bool SiLoaderExt::Load()
+{
+	for (const auto& file : files) {
+		LoadFile(file.c_str());
+	}
+
+	for (const auto& directive : directives) {
+		LoadDirective(directive.c_str());
+	}
+
+	return true;
+}
+
+std::optional<MxCore*> SiLoaderExt::HandleFind(StreamObject p_object, LegoWorld* p_world)
+{
+	for (const auto& key : replace) {
+		if (key.first == p_object) {
+			return p_world->Find(key.second.first, key.second.second);
+		}
+	}
+
+	return std::nullopt;
+}
+
+std::optional<MxResult> SiLoaderExt::HandleStart(MxDSAction& p_action)
+{
+	StreamObject object{p_action.GetAtomId(), p_action.GetObjectId()};
+	auto start = [](const StreamObject& p_object, MxDSAction& p_in, MxDSAction& p_out) -> MxResult {
+		if (!OpenStream(p_object.first.GetInternal())) {
+			return FAILURE;
+		}
+
+		p_out.SetAtomId(p_object.first);
+		p_out.SetObjectId(p_object.second);
+		p_out.SetUnknown24(p_in.GetUnknown24());
+		p_out.SetNotificationObject(p_in.GetNotificationObject());
+		p_out.SetOrigin(p_in.GetOrigin());
+		return Start(&p_out);
+	};
+
+	for (const auto& key : startWith) {
+		if (key.first == object && !IsWorld(key.first)) {
+			MxDSAction action;
+			start(key.second, p_action, action);
+		}
+	}
+
+	for (const auto& key : replace) {
+		if (key.first == object) {
+			MxDSAction action;
+			MxResult result = start(key.second, p_action, action);
+
+			if (result == SUCCESS) {
+				p_action.SetUnknown24(action.GetUnknown24());
+			}
+
+			return result;
+		}
+	}
+
+	if (p_action.GetExtraLength() == 0 || !SDL_strstr(p_action.GetExtraData(), prependedMarker)) {
+		for (const auto& key : prepend) {
+			if (key.first == object) {
+					auto it = std::find(firedPrepend.begin(), firedPrepend.end(), key.second);
+				if (it != firedPrepend.end()) {
+					firedPrepend.erase(it);
+				}
+				MxDSAction action;
+				MxResult result = start(key.second, p_action, action);
+
+				if (result == SUCCESS) {
+					p_action.SetUnknown24(action.GetUnknown24());
+				}
+
+				return result;
+			}
+		}
+	}
+
+	if (std::find(fullScreenMovie.begin(), fullScreenMovie.end(), object) != fullScreenMovie.end()) {
+		VideoManager()->EnableFullScreenMovie(TRUE);
+	}
+
+	if (std::find(disable3d.begin(), disable3d.end(), object) != disable3d.end()) {
+		VideoManager()->FUN_1007c520();
+	}
+
+	return std::nullopt;
+}
+
+MxBool SiLoaderExt::HandleWorld(LegoWorld* p_world)
+{
+	StreamObject object{p_world->GetAtomId(), p_world->GetEntityId()};
+	auto start = [](const StreamObject& p_object, MxDSAction& p_out) {
+		if (!OpenStream(p_object.first.GetInternal())) {
+			return;
+		}
+
+		p_out.SetAtomId(p_object.first);
+		p_out.SetObjectId(p_object.second);
+		p_out.SetUnknown24(-1);
+		Start(&p_out);
+	};
+
+	for (const auto& key : startWith) {
+		if (key.first == object) {
+			MxDSAction action;
+			start(key.second, action);
+		}
+	}
+
+	return TRUE;
+}
+
+MxBool SiLoaderExt::HandleEnable(LegoWorld* p_world, MxBool p_enable)
+{
+	StreamObject object{p_world->GetAtomId(), p_world->GetEntityId()};
+
+	if (p_enable) {
+		firedPrepend.clear();
+
+		auto start = [](const StreamObject& p_object, MxDSAction& p_out) {
+			if (!OpenStream(p_object.first.GetInternal())) {
+				return;
+			}
+
+			p_out.SetAtomId(p_object.first);
+			p_out.SetObjectId(p_object.second);
+			p_out.SetUnknown24(-1);
+			Start(&p_out);
+		};
+
+		for (const auto& key : enableWith) {
+			if (key.first == object) {
+				MxDSAction action;
+				start(key.second, action);
+			}
+		}
+	}
+	else {
+		for (const auto& key : enableWith) {
+			if (key.first == object) {
+				MxDSAction action;
+				action.SetAtomId(key.second.first);
+				action.SetObjectId(key.second.second);
+				action.SetUnknown24(-1);
+				DeleteObject(action);
+			}
+		}
+	}
+
+	return TRUE;
+}
+
+std::optional<MxBool> SiLoaderExt::HandleRemove(StreamObject p_object, LegoWorld* p_world)
+{
+	for (const auto& key : removeWith) {
+		if (key.first == p_object) {
+			RemoveFromWorld(key.second.first, key.second.second, p_world->GetAtomId(), p_world->GetEntityId());
+		}
+	}
+
+	for (const auto& key : replace) {
+		if (key.first == p_object) {
+			return RemoveFromWorld(key.second.first, key.second.second, p_world->GetAtomId(), p_world->GetEntityId());
+		}
+	}
+
+	return std::nullopt;
+}
+
+std::optional<MxBool> SiLoaderExt::HandleDelete(MxDSAction& p_action)
+{
+	StreamObject object{p_action.GetAtomId(), p_action.GetObjectId()};
+	auto deleteObject = [](const StreamObject& p_object, MxDSAction& p_in, MxDSAction& p_out) {
+		p_out.SetAtomId(p_object.first);
+		p_out.SetObjectId(p_object.second);
+		p_out.SetUnknown24(p_in.GetUnknown24());
+		p_out.SetNotificationObject(p_in.GetNotificationObject());
+		p_out.SetOrigin(p_in.GetOrigin());
+		DeleteObject(p_out);
+	};
+
+	for (const auto& key : removeWith) {
+		if (key.first == object) {
+			MxDSAction action;
+			deleteObject(key.second, p_action, action);
+		}
+	}
+
+	for (const auto& key : replace) {
+		if (key.first == object) {
+			MxDSAction action;
+			deleteObject(key.second, p_action, action);
+			p_action.SetUnknown24(action.GetUnknown24());
+			return TRUE;
+		}
+	}
+
+	return std::nullopt;
+}
+
+MxBool SiLoaderExt::HandleEndAction(MxEndActionNotificationParam& p_param)
+{
+	StreamObject object{p_param.GetAction()->GetAtomId(), p_param.GetAction()->GetObjectId()};
+	auto start = [](const StreamObject& p_object, MxDSAction& p_in, MxDSAction& p_out) -> MxResult {
+		if (!OpenStream(p_object.first.GetInternal())) {
+			return FAILURE;
+		}
+
+		p_out.SetAtomId(p_object.first);
+		p_out.SetObjectId(p_object.second);
+		p_out.SetUnknown24(-1);
+		p_out.SetNotificationObject(p_in.GetNotificationObject());
+		p_out.SetOrigin(p_in.GetOrigin());
+		p_out.AppendExtra(sizeof(prependedMarker), prependedMarker);
+		return Start(&p_out);
+	};
+
+	if (std::find(fullScreenMovie.begin(), fullScreenMovie.end(), object) != fullScreenMovie.end()) {
+		VideoManager()->EnableFullScreenMovie(FALSE);
+	}
+
+	if (!p_param.GetSender() || !p_param.GetSender()->IsA("MxCompositePresenter")) {
+		for (const auto& key : prepend) {
+			if (key.second == object &&
+				std::find(firedPrepend.begin(), firedPrepend.end(), object) == firedPrepend.end()) {
+				firedPrepend.push_back(object);
+				MxDSAction action;
+				start(key.first, *p_param.GetAction(), action);
+			}
+		}
+	}
+
+	return TRUE;
+}
+
+bool SiLoaderExt::LoadFile(const char* p_file)
+{
+	si::Interleaf si;
+	MxStreamController* controller;
+
+	MxString path;
+	if (!Common::ResolveGamePath(p_file, path) ||
+		si.Read(path.GetData(), si::Interleaf::ObjectsOnly) != si::Interleaf::ERROR_SUCCESS) {
+		SDL_Log("Could not parse SI file %s", p_file);
+		return false;
+	}
+
+	if (!(controller = OpenStream(p_file))) {
+		return false;
+	}
+
+	ParseExtra(controller->GetAtom(), &si);
+	return true;
+}
+
+bool SiLoaderExt::LoadDirective(const char* p_directive)
+{
+	char originAtom[256], targetAtom[256];
+	uint32_t originId, targetId;
+
+	if (SDL_sscanf(
+			p_directive,
+			"StartWith:%255[^:;]%*[:;]%u%*[:;]%255[^:;]%*[:;]%u",
+			originAtom,
+			&originId,
+			targetAtom,
+			&targetId
+		) == 4) {
+		startWith.emplace_back(
+			StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId},
+			StreamObject{MxAtomId{targetAtom, e_lowerCase2}, targetId}
+		);
+	}
+	else if (SDL_sscanf(p_directive, "RemoveWith:%255[^:;]%*[:;]%u%*[:;]%255[^:;]%*[:;]%u", originAtom, &originId, targetAtom, &targetId) == 4) {
+		removeWith.emplace_back(
+			StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId},
+			StreamObject{MxAtomId{targetAtom, e_lowerCase2}, targetId}
+		);
+	}
+	else if (SDL_sscanf(p_directive, "EnableWith:%255[^:;]%*[:;]%u%*[:;]%255[^:;]%*[:;]%u", originAtom, &originId, targetAtom, &targetId) == 4) {
+		enableWith.emplace_back(
+			StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId},
+			StreamObject{MxAtomId{targetAtom, e_lowerCase2}, targetId}
+		);
+	}
+	else if (SDL_sscanf(p_directive, "Replace:%255[^:;]%*[:;]%u%*[:;]%255[^:;]%*[:;]%u", originAtom, &originId, targetAtom, &targetId) == 4) {
+		replace.emplace_back(
+			StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId},
+			StreamObject{MxAtomId{targetAtom, e_lowerCase2}, targetId}
+		);
+	}
+	else if (SDL_sscanf(p_directive, "Prepend:%255[^:;]%*[:;]%u%*[:;]%255[^:;]%*[:;]%u", originAtom, &originId, targetAtom, &targetId) == 4) {
+		prepend.emplace_back(
+			StreamObject{MxAtomId{targetAtom, e_lowerCase2}, targetId},
+			StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId}
+		);
+	}
+	else if (SDL_sscanf(p_directive, "FullScreenMovie:%255[^:;]%*[:;]%u", originAtom, &originId) == 2) {
+		fullScreenMovie.emplace_back(StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId});
+	}
+	else if (SDL_sscanf(p_directive, "Disable3d:%255[^:;]%*[:;]%u", originAtom, &originId) == 2) {
+		disable3d.emplace_back(StreamObject{MxAtomId{originAtom, e_lowerCase2}, originId});
+	}
+
+	return true;
+}
+
+MxStreamController* SiLoaderExt::OpenStream(const char* p_file)
+{
+	MxStreamController* controller;
+
+	if (!(controller = Streamer()->Open(p_file, MxStreamer::e_diskStream))) {
+		SDL_Log("Could not load SI file %s", p_file);
+		return nullptr;
+	}
+
+	return controller;
+}
+
+void SiLoaderExt::ParseExtra(const MxAtomId& p_atom, si::Core* p_core)
+{
+	for (si::Core* child : p_core->GetChildren()) {
+		if (si::Object* object = dynamic_cast<si::Object*>(child)) {
+			if (object->type() != si::MxOb::Null) {
+				std::string extra(object->extra_.data(), object->extra_.size());
+				const char* directive;
+				char atom[256];
+				uint32_t id;
+
+				if ((directive = SDL_strstr(extra.c_str(), "StartWith:"))) {
+					if (SDL_sscanf(directive, "StartWith:%255[^:;]%*[:;]%u", atom, &id) == 2) {
+						startWith.emplace_back(
+							StreamObject{MxAtomId{atom, e_lowerCase2}, id},
+							StreamObject{p_atom, object->id_}
+						);
+					}
+				}
+
+				if ((directive = SDL_strstr(extra.c_str(), "RemoveWith:"))) {
+					if (SDL_sscanf(directive, "RemoveWith:%255[^:;]%*[:;]%u", atom, &id) == 2) {
+						removeWith.emplace_back(
+							StreamObject{MxAtomId{atom, e_lowerCase2}, id},
+							StreamObject{p_atom, object->id_}
+						);
+					}
+				}
+
+				if ((directive = SDL_strstr(extra.c_str(), "EnableWith:"))) {
+					if (SDL_sscanf(directive, "EnableWith:%255[^:;]%*[:;]%u", atom, &id) == 2) {
+						enableWith.emplace_back(
+							StreamObject{MxAtomId{atom, e_lowerCase2}, id},
+							StreamObject{p_atom, object->id_}
+						);
+					}
+				}
+
+				if ((directive = SDL_strstr(extra.c_str(), "Replace:"))) {
+					if (SDL_sscanf(directive, "Replace:%255[^:;]%*[:;]%u", atom, &id) == 2) {
+						replace.emplace_back(
+							StreamObject{MxAtomId{atom, e_lowerCase2}, id},
+							StreamObject{p_atom, object->id_}
+						);
+					}
+				}
+
+				if ((directive = SDL_strstr(extra.c_str(), "Prepend:"))) {
+					if (SDL_sscanf(directive, "Prepend:%255[^:;]%*[:;]%u", atom, &id) == 2) {
+						prepend.emplace_back(
+							StreamObject{p_atom, object->id_},
+							StreamObject{MxAtomId{atom, e_lowerCase2}, id}
+						);
+					}
+				}
+
+				if ((directive = SDL_strstr(extra.c_str(), "FullScreenMovie"))) {
+					fullScreenMovie.emplace_back(StreamObject{p_atom, object->id_});
+				}
+
+				if ((directive = SDL_strstr(extra.c_str(), "Disable3d"))) {
+					disable3d.emplace_back(StreamObject{p_atom, object->id_});
+				}
+			}
+		}
+
+		ParseExtra(p_atom, child);
+	}
+}
+
+bool SiLoaderExt::IsWorld(const StreamObject& p_object)
+{
+	// The convention in LEGO Island is that world objects are always at ID 0
+	if (p_object.second == 0) {
+		for (int i = 0; i < LegoOmni::e_numWorlds; i++) {
+			if (p_object.first == *Lego()->GetWorldAtom((LegoOmni::World) i)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}

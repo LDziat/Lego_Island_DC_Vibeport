@@ -1,0 +1,101 @@
+#ifndef __LEGOMESH_H
+#define __LEGOMESH_H
+
+#include "decomp.h"
+#include "legocolor.h"
+#include "misc/legotypes.h"
+
+class LegoStorage;
+
+// SIZE 0x1c
+struct LegoMeshUnkComponent {
+	// FUNCTION: BETA10 0x101905b0
+	~LegoMeshUnkComponent()
+	{
+		if (m_unk0x08) {
+			delete m_unk0x08;
+		}
+		if (m_unk0x0c) {
+			delete m_unk0x0c;
+		}
+		if (m_unk0x10) {
+			delete m_unk0x10;
+		}
+		if (m_unk0x14) {
+			delete m_unk0x14;
+		}
+		if (m_unk0x18) {
+			delete m_unk0x18;
+		}
+	}
+
+	undefined m_unk0x00[8]; // 0x00
+	undefined* m_unk0x08;   // 0x08
+	undefined* m_unk0x0c;   // 0x0c
+	undefined* m_unk0x10;   // 0x10
+	undefined* m_unk0x14;   // 0x14
+	undefined* m_unk0x18;   // 0x18
+};
+
+// SYNTHETIC: BETA10 0x10190530
+// LegoMeshUnkComponent::`scalar deleting destructor'
+
+// VTABLE: LEGO1 0x100dd228
+// VTABLE: BETA10 0x101c39c4
+// SIZE 0x24
+class LegoMesh {
+public:
+	enum {
+		e_flat,
+		e_gouraud,
+		e_wireframe
+	};
+
+	LegoMesh();
+	virtual ~LegoMesh();
+
+	// FUNCTION: BETA10 0x1018e6f0
+	LegoColor GetColor() { return m_color; }
+
+	void SetColor(LegoColor p_color) { m_color = p_color; }
+
+	// FUNCTION: BETA10 0x1018e720
+	LegoFloat GetAlpha() { return m_alpha; }
+
+	// FUNCTION: BETA10 0x1018e740
+	LegoU8 GetShading() { return m_shading; }
+
+	void SetShading(LegoU8 p_shading) { m_shading = p_shading; }
+
+	// FUNCTION: BETA10 0x1018e760
+	LegoU8 GetUnknown0x0d() { return m_unk0x0d; }
+
+	// FUNCTION: BETA10 0x1018e780
+	const LegoChar* GetTextureName() { return m_textureName; }
+
+	// FUNCTION: BETA10 0x1018e7a0
+	const LegoChar* GetMaterialName() { return m_materialName; }
+
+	// FUNCTION: BETA10 0x1018e7c0
+	LegoBool GetUseAlias() { return m_useAlias; }
+
+	LegoResult Read(LegoStorage* p_storage);
+
+	// SYNTHETIC: LEGO1 0x100d3840
+	// SYNTHETIC: BETA10 0x101904f0
+	// LegoMesh::`scalar deleting destructor'
+
+protected:
+	LegoColor m_color;               // 0x04
+	LegoFloat m_alpha;               // 0x08
+	LegoU8 m_shading;                // 0x0c
+	LegoU8 m_unk0x0d;                // 0x0d
+	LegoMeshUnkComponent* m_unk0x10; // 0x10 - unused, except in destructor
+	undefined4 m_unk0x14;            // 0x14 - unused
+	LegoChar* m_textureName;         // 0x18
+	LegoChar* m_materialName;        // 0x1c
+	undefined m_unk0x20;             // 0x20 - unused
+	LegoBool m_useAlias;             // 0x21
+};
+
+#endif // __LEGOMESH_H

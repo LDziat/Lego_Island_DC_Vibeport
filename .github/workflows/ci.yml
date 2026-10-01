@@ -1,0 +1,409 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format:
+    name: 'clang-format'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run clang-format
+        run: |
+          find CONFIG LEGO1 ISLE miniwin -iname '*.h' -o -iname '*.cpp' | xargs \
+          pipx run "clang-format>=17,<18" \
+            --style=file \
+            -i
+      - name: Check diff
+        run: |
+          git diff --exit-code
+
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container || '' }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell || 'sh' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: 'Linux',               os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: true,  linux: true, werror: true,   clang-tidy: true, build-assets: true }
+          - { name: 'MSVC (x86)',          os: 'windows-latest', generator: 'Ninja',                 dx5: true,  config: false, msvc: true,  werror: false,  clang-tidy: false,  vc-arch: 'amd64_x86' }
+          - { name: 'MSVC (x64)',          os: 'windows-latest', generator: 'Ninja',                 dx5: false, config: true,  msvc: true,  werror: false,  clang-tidy: false,   vc-arch: 'amd64' }
+          - { name: 'MSVC (arm64)',        os: 'windows-latest', generator: 'Ninja',                 dx5: false, config: false, msvc: true,  werror: false,  clang-tidy: false,  vc-arch: 'amd64_arm64' }
+          - { name: 'msys2 mingw64',       os: 'windows-latest', generator: 'Ninja',                 dx5: false, config: true,  mingw: true, werror: true,   clang-tidy: true,   msystem: 'mingw64', msys-env: 'mingw-w64-x86_64', shell: 'msys2 {0}' }
+          - { name: 'macOS',               os: 'macos-latest',   generator: 'Ninja',                 dx5: false, config: true,  brew: true,  werror: true,   clang-tidy: false }
+          - { name: 'iOS',                 os: 'macos-15',       generator: 'Xcode',                 dx5: false, config: false, brew: true,  werror: true,   clang-tidy: false,  cmake-args: '-DCMAKE_SYSTEM_NAME=iOS', ios: true }
+          - { name: 'Emscripten',          os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: false, emsdk: true, werror: true,   clang-tidy: false,  cmake-wrapper: 'emcmake' }
+          - { name: 'Nintendo 3DS',        os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: false, n3ds: true,  werror: true,   clang-tidy: false,  container: 'devkitpro/devkitarm:latest', cmake-args: '-DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/3DS.cmake' }
+          - { name: 'Nintendo Switch',     os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: false, nx: true,    werror: true,   clang-tidy: false,  container: 'devkitpro/devkita64:latest', cmake-args: '-DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake' }
+          - { name: 'Xbox One',            os: 'windows-latest', generator: 'Visual Studio 18 2026', dx5: false, config: false, msvc: true,  werror: false,  clang-tidy: false,  vc-arch: 'amd64', cmake-args: '-DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0.26100.0', xbox-one: true}
+          - { name: 'Android',             os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: false, android: true, werror: true, clang-tidy: false,}
+          - { name: 'Vita',                os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: false, vita: true,  werror: true,   clang-tidy: false, cmake-args: '--toolchain /usr/local/vitasdk/share/vita.toolchain.cmake'}
+          - { name: 'DOS',                 os: 'ubuntu-latest',  generator: 'Ninja',                 dx5: false, config: false, dos: true,   werror: true,   clang-tidy: false, cmake-args: '--toolchain $GITHUB_WORKSPACE/CMake/i586-pc-msdosdjgpp.cmake'}
+    steps:
+      - name: Setup vcvars
+        if: ${{ !!matrix.msvc }}
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.vc-arch }}
+
+      - name: Set up MSYS2
+        if: ${{ !!matrix.msystem }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          install: >-
+            ${{ matrix.msys-env }}-cc
+            ${{ matrix.msys-env }}-cmake
+            ${{ matrix.msys-env }}-ninja
+            ${{ matrix.msys-env }}-clang-tools-extra
+            ${{ (matrix.config && format('{0}-qt6-base', matrix.msys-env)) || '' }}
+      - name: Install Qt
+        if: ${{ !!matrix.msvc && matrix.config }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          cache: 'true'          
+
+      - name: Install 3DS dependencies
+        if: ${{ matrix.n3ds }}
+        run: |
+          wget https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
+          unzip -j "bannertool.zip" "linux-x86_64/bannertool" -d "/opt/devkitpro/tools/bin"
+          wget https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18/makerom-v0.18-ubuntu_x86_64.zip
+          unzip "makerom-v0.18-ubuntu_x86_64.zip" "makerom" -d "/opt/devkitpro/tools/bin"
+          chmod a+x /opt/devkitpro/tools/bin/makerom
+
+      - name: Install Linux dependencies (apt-get)
+        if: ${{ matrix.linux }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxext-dev libxrandr-dev libxrender-dev libxfixes-dev libxi-dev libxinerama-dev \
+            libxcursor-dev libwayland-dev libxkbcommon-dev wayland-protocols libgl1-mesa-dev qt6-base-dev \
+            libasound2-dev qt6-xdgdesktopportal-platformtheme libxss-dev libxtst-dev
+
+      - name: Install macOS dependencies (brew)
+        if: ${{ matrix.brew }}
+        run: |
+          brew update
+          brew uninstall cmake || true
+          brew install cmake ninja llvm qt6
+          echo "LLVM_ROOT=$(brew --prefix llvm)/bin" >> $GITHUB_ENV
+      
+      - name: Use latest Xcode
+        if: ${{ matrix.ios }}
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: latest-stable
+      
+      - name: Install iOS components
+        if: ${{ matrix.ios }}
+        run: |
+          xcrun simctl list > /dev/null
+          xcodebuild -downloadPlatform iOS
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v15
+        if: ${{ matrix.emsdk }}
+
+      - name: Setup ninja
+        if: ${{ matrix.msvc }}
+        uses: ashutoshvarma/setup-ninja@master
+      
+      - name: Setup vitasdk
+        if: ${{ matrix.vita }}
+        run: |
+          git clone https://github.com/vitasdk/vdpm
+          cd vdpm
+          ./bootstrap-vitasdk.sh
+          export VITASDK=/usr/local/vitasdk
+          export PATH=$VITASDK/bin:$PATH
+          echo "VITASDK=/usr/local/vitasdk" >> $GITHUB_ENV
+          echo "$VITASDK/bin" >> $GITHUB_PATH
+          ./install-all.sh
+
+      - uses: actions/checkout@v6
+
+      - name: Checkout LFS
+        if: ${{ matrix.build-assets }}
+        run: |
+          git lfs pull
+
+      - name: Setup Java (Android)
+        if: ${{ matrix.android }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 'Set up DJGPP toolchain'
+        uses: ./.github/actions/setup-djgpp-toolchain
+        if: ${{ matrix.dos }}
+
+      - name: Get CMake (Android)
+        if: ${{ matrix.android }}
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: 3.30.5
+
+      - name: Build (Android)
+        if: ${{ matrix.android }}
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.keyAlias }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.keyPassword }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.keystorePassword }}
+          SIGNING_STORE_FILE: ${{ github.workspace }}/release.keystore
+        run: |
+          echo "${{ secrets.keystore }}" | base64 -d > release.keystore
+          cd android-project
+          TASKS="assembleDebug"
+          if [ -n "$SIGNING_KEY_ALIAS" ]; then
+            TASKS="assembleDebug packageRelease"
+          fi
+          ./gradlew $TASKS \
+            --info \
+            -PcmakeArgs="-DCMAKE_BUILD_TYPE=Release \
+              -DISLE_USE_DX5=${{ !!matrix.dx5 }} \
+              -DISLE_BUILD_CONFIG=${{ !!matrix.config }} \
+              -DENABLE_CLANG_TIDY=${{ !!matrix.clang-tidy  }} \
+              -DISLE_WERROR=${{ !!matrix.werror }} \
+              -Werror=dev"
+
+      - name: Configure (CMake)
+        if: ${{ !matrix.android }}
+        run: |
+          ${{ matrix.cmake-wrapper || '' }} cmake -S . -B build -G "${{ matrix.generator }}" \
+            ${{ matrix.cmake-args || '' }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DISLE_USE_DX5=${{ !!matrix.dx5 }} \
+            -DISLE_BUILD_CONFIG=${{ !!matrix.config }} \
+            -DISLE_BUILD_ASSETS=${{ !!matrix.build-assets }} \
+            -DENABLE_CLANG_TIDY=${{ !!matrix.clang-tidy  }} \
+            -DISLE_WERROR=${{ !!matrix.werror }} \
+            -Werror=dev
+
+      - name: Build (CMake)
+        if: ${{ !matrix.android }}
+        run: cmake --build build --verbose --config Release
+
+      - name: Package (CPack)
+        if: ${{ !matrix.n3ds && !matrix.nx && !matrix.android && !matrix.vita }}
+        run: |
+          cd build
+          success=0
+          max_tries=10
+          for i in $(seq $max_tries); do
+            cpack . && success=1
+            if test $success = 1; then
+              break
+            fi
+            echo "Package creation failed. Sleep 1 second and try again."
+            sleep 1
+          done
+          if test $success = 0; then
+            echo "Package creation failed after $max_tries attempts."
+            exit 1
+          fi
+
+      - name: Install linuxdeploy
+        if: ${{ matrix.linux }}
+        id: install-linuxdeploy
+        uses: miurahr/install-linuxdeploy-action@v1.8.0
+        with:
+          plugins: qt appimage
+
+      - name: Package (AppImage)
+        if: ${{ matrix.linux }}
+        run: |
+          cd build && \
+          export LD_LIBRARY_PATH=".:$LD_LIBRARY_PATH" && \
+          NO_STRIP=1 ${{ steps.install-linuxdeploy.outputs.linuxdeploy }} \
+            -p qt \
+            -e isle \
+            -e isle-config \
+            -d packaging/linux/org.legoisland.Isle.desktop \
+            -i icons/org.legoisland.Isle.svg \
+            --custom-apprun=../packaging/linux/appimage/AppRun \
+            --appdir packaging/linux/appimage/AppDir \
+            --output appimage && \
+          mv *.AppImage dist/
+
+      - name: Package (3DS)
+        if: ${{ matrix.n3ds }}
+        run: |
+          cd build
+          mkdir dist
+          mv *.3dsx dist/
+          mv *.cia dist/
+
+      - name: Package (Switch)
+        if: ${{ matrix.nx }}
+        run: |
+          cd build
+          mkdir dist
+          mv *.nro dist/
+      
+      - name: Package (Vita)
+        if: ${{ matrix.vita }}
+        run: |
+          cd build
+          mkdir dist
+          mv *.vpk dist/
+
+      - name: Package (Android)
+        if: ${{ matrix.android }}
+        run: |
+          mkdir -p build/dist
+          mv  android-project/app/build/outputs/apk/*/*.apk build/dist/
+
+      - name: Package Assets Separately
+        if: matrix.build-assets
+        run: (cd build/assets && zip -r ../dist/isle-assets.zip .)
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: '${{ matrix.name }}'
+          path: |
+            build/dist/isle-*
+            build/dist/*.AppImage
+            build/dist/*.3dsx
+            build/dist/*.cia
+            build/dist/*.nro
+            build/dist/*.apk
+            build/dist/*.vpk
+
+  freebsd:
+    name: 'FreeBSD'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.0"
+          usesh: true
+          prepare: |
+            pkg install -y cmake ninja qt6-base git xorg alsa-lib
+          run: |
+            cmake -S . -B build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DISLE_USE_DX5=false \
+              -DISLE_BUILD_CONFIG=true \
+              -DISLE_WERROR=true \
+              -Werror=dev
+            cmake --build build --verbose --config Release
+            cd build && cpack .
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: 'FreeBSD'
+          path: build/dist/isle-*
+
+  flatpak:
+    name: "Flatpak (${{ matrix.arch }})"
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-latest
+
+          - arch: aarch64
+            os: ubuntu-22.04-arm
+
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.8
+      options: --privileged
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: org.legoisland.Isle.${{ matrix.arch }}.flatpak
+          manifest-path: packaging/linux/flatpak/org.legoisland.Isle.json
+          arch: ${{ matrix.arch }}
+
+  ncc:
+    name: 'C++'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "16"
+
+      - name: Install python libraries
+        run: |
+          pip install -r tools/requirements.txt
+
+      - name: Run ncc
+        run: |
+          action_headers=$(find LEGO1/lego/legoomni/include/actions \
+            -name '*.h' -print0 | xargs -0 echo)
+
+          python3 tools/ncc/ncc.py \
+            --clang-lib ${{ env.LLVM_PATH }}/lib/libclang.so \
+            --recurse \
+            --style tools/ncc/ncc.style \
+            --skip tools/ncc/skip.yml \
+            --definition WINAPI FAR BOOL CALLBACK HWND__=HWND SDLCALL \
+            --include \
+              util \
+              LEGO1 \
+              LEGO1/omni/include \
+              LEGO1/lego/legoomni/include \
+              LEGO1/lego/sources \
+            --exclude \
+              LEGO1/omni/include/flic.h \
+              LEGO1/omni/src/video/flic.cpp \
+              $action_headers \
+            --path LEGO1/omni LEGO1/lego/legoomni
+
+  release:
+    name: 'Release'
+    if: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - flatpak
+      - freebsd
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "*"
+          path: Release
+          merge-multiple: true
+
+      - name: Checkout uploadtool
+        uses: actions/checkout@v6
+        with:
+          repository: 'probonopd/uploadtool'
+          path: 'uploadtool'
+
+      - name: Upload Continuous Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./uploadtool/upload.sh Release/*

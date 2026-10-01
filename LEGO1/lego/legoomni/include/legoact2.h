@@ -1,0 +1,160 @@
+#ifndef LEGOACT2_H
+#define LEGOACT2_H
+
+#include "act2brick.h"
+#include "legogamestate.h"
+#include "legostate.h"
+#include "legoworld.h"
+
+class Act2Actor;
+class LegoPathStructNotificationParam;
+class MxEndActionNotificationParam;
+
+// VTABLE: LEGO1 0x100d4a70
+// VTABLE: BETA10 0x101ba910
+// SIZE 0x10
+class LegoAct2State : public LegoState {
+public:
+	enum {
+		c_badEnding = 104
+	};
+
+	LegoAct2State()
+	{
+		m_state = 0;
+		m_enabled = FALSE;
+	}
+	~LegoAct2State() override {}
+
+	// FUNCTION: LEGO1 0x1000df70
+	MxBool IsSerializable() override { return FALSE; } // vtable+0x14
+
+	// FUNCTION: LEGO1 0x1000df80
+	// FUNCTION: BETA10 0x1003c7e0
+	const char* ClassName() const override // vtable+0x0c
+	{
+		// STRING: LEGO1 0x100f0428
+		return "LegoAct2State";
+	}
+
+	// FUNCTION: LEGO1 0x1000df90
+	MxBool IsA(const char* p_name) const override // vtable+0x10
+	{
+		return !strcmp(p_name, LegoAct2State::ClassName()) || LegoState::IsA(p_name);
+	}
+
+	// SYNTHETIC: LEGO1 0x1000e040
+	// LegoAct2State::`scalar deleting destructor'
+
+	// FUNCTION: BETA10 0x100151b0
+	void SetState(MxU32 p_state) { m_state = p_state; }
+
+	MxU32 GetState() { return m_state; }
+
+	// TODO: Most likely getters/setters are not used according to BETA. (?)
+
+	MxU32 m_state;    // 0x08
+	MxBool m_enabled; // 0x0c
+};
+
+// VTABLE: LEGO1 0x100d82e0
+// VTABLE: BETA10 0x101ba898
+// SIZE 0x1154
+class LegoAct2 : public LegoWorld {
+public:
+	LegoAct2();
+	~LegoAct2() override;
+
+	MxLong Notify(MxParam& p_param) override;         // vtable+0x04
+	MxResult Tickle() override;                       // vtable+0x08
+	MxResult Create(MxDSAction& p_dsAction) override; // vtable+0x18
+	void ReadyWorld() override;                       // vtable+0x50
+
+	// FUNCTION: LEGO1 0x1004fe10
+	MxBool WaitForTransition() override { return TRUE; } // vtable+0x5c
+
+	void VTable0x60() override;            // vtable+0x60
+	MxBool Escape() override;              // vtable+0x64
+	void Enable(MxBool p_enable) override; // vtable+0x68
+
+	void SetAmbulanceActor(Act2Actor* p_ambulanceActor) { m_ambulanceActor = p_ambulanceActor; }
+	void SetDestLocation(LegoGameState::Area p_destLocation) { m_destLocation = p_destLocation; }
+
+	MxResult CreateDroppingBrick();
+	void CreateBrick();
+	MxResult BadEnding();
+	MxResult StartAction(
+		Act2mainScript::Script p_objectId,
+		MxBool p_isAnimation,
+		MxBool p_ignoreCurrentAction,
+		Mx3DPointFloat* p_location,
+		Mx3DPointFloat* p_direction,
+		Mx3DPointFloat* p_up
+	);
+
+	// SYNTHETIC: LEGO1 0x1004fe20
+	// LegoAct2::`scalar deleting destructor'
+
+private:
+	enum {
+		e_initial = 0,
+		e_startSpeech = 1,
+		e_holdingSpeech = 2,
+		e_startDescription = 3,
+		e_explaining = 4,
+		e_goingToResidentialArea = 5,
+		e_atResidentialArea = 6,
+		e_chase = 7,
+		e_droppingBrick = 9,
+		e_goingToHide = 10,
+		e_hidden = 11,
+		e_distributeRemainingBricks = 12,
+		e_brickHunt = 13,
+		e_allPiecesCollected = 14,
+	};
+
+	MxLong HandleEndAction(MxEndActionNotificationParam& p_param);
+	MxLong HandleTransitionEnd();
+	MxLong HandlePathStruct(LegoPathStructNotificationParam& p_param);
+	void PlayMusic(JukeboxScript::Script p_objectId);
+	void DisableAnimations();
+	void HideMaPaInfo();
+	void InitBricks();
+	void UninitBricks();
+	void SpawnBricks();
+	void CheckBricksterDestroying(MxS32 p_pathData);
+	void CheckBricksterIsLoose(MxS32 p_pathData);
+	MxResult InitializeShooting();
+
+	Act2Brick m_bricks[10];        // 0x00f8
+	MxU8 m_nextBrick;              // 0x10c0
+	MxU8 m_removedBricks;          // 0x10c1
+	MxBool m_ready;                // 0x10c2
+	undefined4 m_state;            // 0x10c4
+	JukeboxScript::Script m_music; // 0x10c8
+	LegoAct2State* m_gameState;    // 0x10cc
+	MxS32 m_timeSinceLastStage;    // 0x10d0
+
+	// variable name verified by BETA10 0x10014633
+	const char* m_siFile; // 0x10d4
+
+	LegoROI* m_pepper;                         // 0x10d8
+	MxMatrix m_transformOnDisable;             // 0x10dc
+	LegoPathBoundary* m_boundaryOnDisable;     // 0x1124
+	LegoROI* m_ambulance;                      // 0x1128
+	undefined4 m_unk0x112c;                    // 0x112c
+	undefined4 m_unk0x1130;                    // 0x1130
+	undefined4 m_unk0x1134;                    // 0x1134
+	Act2Actor* m_ambulanceActor;               // 0x1138
+	undefined m_unk0x113c;                     // 0x113c
+	Act2mainScript::Script m_currentAction;    // 0x1140
+	Act2mainScript::Script m_infomanDirecting; // 0x1144
+	undefined4 m_unk0x1148;                    // 0x1148
+	undefined m_firstBrick;                    // 0x114c
+	undefined m_secondBrick;                   // 0x114d
+	undefined m_thirdBrick;                    // 0x114e
+	undefined m_fourthBrick;                   // 0x114e
+	LegoGameState::Area m_destLocation;        // 0x1150
+};
+
+#endif // LEGOACT2_H

@@ -1,0 +1,62 @@
+#pragma once
+
+#include <SDL/SDL_version.h>
+#if defined(SDL_VERSION_ATLEAST) && SDL_VERSION_ATLEAST(2,0,0)
+#include <SDL/SDL_log.h>
+#else
+#include <stdio.h>
+#ifndef SDL_Log
+#define SDL_Log printf
+#endif
+#ifndef SDL_LogInfo
+#define SDL_LogInfo(cat, ...) printf(__VA_ARGS__)
+#endif
+#ifndef SDL_LogError
+#define SDL_LogError(cat, ...) printf(__VA_ARGS__)
+#endif
+#endif
+#include <psp2/gxm.h>
+#include <psp2/kernel/clib.h>
+
+#ifdef DEBUG
+#define DEBUG_ONLY_PRINTF(...) sceClibPrintf(__VA_ARGS__)
+#else
+#define DEBUG_ONLY_PRINTF(...)
+#endif
+
+#define SCE_ERR(func, ...)                                                                                             \
+	({                                                                                                                 \
+		DEBUG_ONLY_PRINTF("%s\n", #func);                                                                              \
+		int __sce_err_ret_val = func(__VA_ARGS__);                                                                     \
+		if (__sce_err_ret_val < 0) {                                                                                   \
+			sceClibPrintf(#func " error: 0x%x\n", __sce_err_ret_val);                                                  \
+		}                                                                                                              \
+		__sce_err_ret_val;                                                                                             \
+	})
+
+#define ALIGN(x, a) (((x) + ((a) -1)) & ~((a) -1))
+
+#define ALIGNMENT(n, a) (((a) - ((n) % (a))) % (a))
+
+#define SET_UNIFORM(buffer, param, value)                                                                              \
+	do {                                                                                                               \
+		size_t __offset = sceGxmProgramParameterGetResourceIndex(param);                                               \
+		void* __dst = (uint8_t*) (buffer) + (__offset * sizeof(uint32_t));                                             \
+		memcpy(__dst, reinterpret_cast<const void*>(&(value)), sizeof(value));                                         \
+	} while (0)
+
+#define GET_SHADER_PARAM(var, gxp, name, ret)                                                                          \
+	const SceGxmProgramParameter* var = sceGxmProgramFindParameterByName(gxp, name);                                   \
+	if (!var) {                                                                                                        \
+		SDL_Log("Failed to find param %s", name);                                                                      \
+		return ret;                                                                                                    \
+	}
+
+static void printMatrix4x4(const float mat[4][4])
+{
+	sceClibPrintf("mat4{\n");
+	for (int i = 0; i < 4; i++) {
+		sceClibPrintf("%f %f %f %f\n", mat[i][0], mat[i][1], mat[i][2], mat[i][3]);
+	}
+	sceClibPrintf("}\n");
+}

@@ -1,0 +1,1229 @@
+#include "legoact2.h"
+
+#include "3dmanager/lego3dmanager.h"
+#include "act2actor.h"
+#include "act2main_actions.h"
+#include "infomain_actions.h"
+#include "islepathactor.h"
+#include "jukebox_actions.h"
+#include "legoanimationmanager.h"
+#include "legoanimpresenter.h"
+#include "legocachesoundmanager.h"
+#include "legogamestate.h"
+#include "legoinputmanager.h"
+#include "legomain.h"
+#include "legopathstruct.h"
+#include "legosoundmanager.h"
+#include "legoutils.h"
+#include "legovideomanager.h"
+#include "misc.h"
+#include "mxactionnotificationparam.h"
+#include "mxbackgroundaudiomanager.h"
+#include "mxdebug.h"
+#include "mxmisc.h"
+#include "mxnotificationmanager.h"
+#include "mxticklemanager.h"
+#include "mxtransitionmanager.h"
+#include "mxvariabletable.h"
+#include "scripts.h"
+
+#include <vec.h>
+
+DECOMP_SIZE_ASSERT(LegoAct2, 0x1154)
+DECOMP_SIZE_ASSERT(LegoAct2State, 0x10)
+
+// GLOBAL: LEGO1 0x100f4474
+Act2mainScript::Script g_bricksterSpeech = (Act2mainScript::Script) 0;
+
+// GLOBAL: LEGO1 0x100f43f0
+// GLOBAL: BETA10 0x101e14a8
+MxS32 g_animationsBricksterIsLoose[] = {
+	Act2mainScript::c_tns030bd_RunAnim,
+	Act2mainScript::c_tns030pg_RunAnim,
+	Act2mainScript::c_tns030rd_RunAnim,
+	Act2mainScript::c_tns030sy_RunAnim,
+	Act2mainScript::c_snsx35ro_RunAnim,
+	Act2mainScript::c_snsx36ro_RunAnim,
+	Act2mainScript::c_snsx37ro_RunAnim,
+	Act2mainScript::c_snsx48cl_RunAnim
+};
+
+// GLOBAL: LEGO1 0x100f4410
+const LegoChar* g_charactersBricksterIsLoose[] = {"bd", "pg", "rd", "sy", "ro", "cl"};
+
+// GLOBAL: LEGO1 0x100f4428
+MxS32 g_animationsAfterChase[] = {
+	Act2mainScript::c_snsx07pa_RunAnim,
+	Act2mainScript::c_snsx12ni_RunAnim,
+	Act2mainScript::c_snsx15la_RunAnim,
+	Act2mainScript::c_snsx47cl_RunAnim,
+	Act2mainScript::c_snsx65pg_RunAnim,
+	Act2mainScript::c_snsx68pg_RunAnim,
+	Act2mainScript::c_snsx69rd_RunAnim,
+	Act2mainScript::c_snsx72sy_RunAnim,
+	0,
+	0,
+	0,
+	0
+};
+
+// GLOBAL: LEGO1 0x100f4458
+const LegoChar* g_charactersAfterChase[] = {"papa", "nick", "laura", "cl", "pg", "rd", "sy"};
+
+// FUNCTION: LEGO1 0x1004fce0
+// FUNCTION: BETA10 0x1003a5a0
+LegoAct2::LegoAct2()
+{
+	m_state = LegoAct2::e_initial;
+	m_gameState = NULL;
+	m_pepper = NULL;
+	m_ambulance = NULL;
+	m_ready = FALSE;
+	m_unk0x1130 = 0;
+	m_nextBrick = 0;
+	m_removedBricks = 0;
+	m_ambulanceActor = NULL;
+	m_currentAction = (Act2mainScript::Script) 0;
+	m_infomanDirecting = (Act2mainScript::Script) 0;
+	m_destLocation = LegoGameState::e_undefined;
+	m_music = JukeboxScript::c_MusicTheme1;
+	m_siFile = "";
+	m_unk0x113c = 5;
+	NotificationManager()->Register(this);
+}
+
+// FUNCTION: LEGO1 0x1004fe40
+// FUNCTION: BETA10 0x1003a6f0
+LegoAct2::~LegoAct2()
+{
+	if (m_ready) {
+		TickleManager()->UnregisterClient(this);
+	}
+
+	DisableAnimations();
+	InputManager()->UnRegister(this);
+	if (UserActor()) {
+		Remove(UserActor());
+	}
+
+	NotificationManager()->Unregister(this);
+}
+
+// FUNCTION: LEGO1 0x1004ff20
+// FUNCTION: BETA10 0x1003a7ff
+MxResult LegoAct2::Create(MxDSAction& p_dsAction)
+{
+	GameState()->FindLoadedAct();
+
+	MxResult result = LegoWorld::Create(p_dsAction);
+	if (result == SUCCESS) {
+		AnimationManager()->EnableCamAnims(FALSE);
+
+		LegoGameState* gameState = GameState();
+		LegoAct2State* state = (LegoAct2State*) gameState->GetState("LegoAct2State");
+
+		if (state == NULL) {
+			state = (LegoAct2State*) gameState->CreateState("LegoAct2State");
+		}
+
+		m_gameState = state;
+		m_gameState->m_state = 0;
+
+		switch (GameState()->GetLoadedAct()) {
+		case LegoGameState::e_act2:
+			GameState()->StopArea(LegoGameState::e_infomain);
+			GameState()->StopArea(LegoGameState::e_act2main);
+			break;
+		case LegoGameState::e_act3:
+			GameState()->StopArea(LegoGameState::e_infomain);
+			GameState()->StopArea(LegoGameState::e_act3script);
+			break;
+		case LegoGameState::e_act1:
+		case LegoGameState::e_actNotFound:
+			GameState()->StopArea(LegoGameState::e_undefined);
+			if (GameState()->m_previousArea == LegoGameState::e_infomain) {
+				GameState()->StopArea(LegoGameState::e_isle);
+			}
+		}
+
+		GameState()->m_currentArea = LegoGameState::e_act2main;
+		GameState()->SetCurrentAct(LegoGameState::e_act2);
+		InputManager()->Register(this);
+		GameState()->m_isDirty = TRUE;
+	}
+
+	return result;
+}
+
+// FUNCTION: LEGO1 0x10050040
+// FUNCTION: BETA10 0x1003a976
+MxResult LegoAct2::Tickle()
+{
+	MxFloat distance;
+
+	if (!m_worldStarted) {
+		LegoWorld::Tickle();
+		return SUCCESS;
+	}
+
+	switch (m_state) {
+	case LegoAct2::e_initial:
+		m_state = LegoAct2::e_startSpeech;
+		break;
+	case LegoAct2::e_startSpeech:
+		((LegoPathActor*) m_pepper->GetEntity())->SetActorState(LegoPathActor::c_disabled);
+
+		switch (SDL_rand(3)) {
+		case 0:
+			g_bricksterSpeech = Act2mainScript::c_tns002br_RunAnim;
+			break;
+		case 1:
+			g_bricksterSpeech = Act2mainScript::c_tns003br_RunAnim;
+			break;
+		case 2:
+			g_bricksterSpeech = Act2mainScript::c_tns004br_RunAnim;
+			break;
+		}
+
+		StartAction(g_bricksterSpeech, TRUE, TRUE, NULL, NULL, NULL);
+		m_timeSinceLastStage = 0;
+		m_state = LegoAct2::e_holdingSpeech;
+		break;
+	case LegoAct2::e_holdingSpeech:
+		if (g_bricksterSpeech) {
+			if (AnimationManager()->FUN_10064ee0(g_bricksterSpeech)) {
+				Disable(FALSE, LegoOmni::c_disableInput | LegoOmni::c_disable3d | LegoOmni::c_clearScreen);
+				g_bricksterSpeech = (Act2mainScript::Script) 0;
+			}
+		}
+
+		m_timeSinceLastStage += 50;
+		break;
+	case LegoAct2::e_startDescription:
+		Disable(FALSE, LegoOmni::c_disableInput | LegoOmni::c_disable3d | LegoOmni::c_clearScreen);
+		m_timeSinceLastStage = 0;
+		m_state = LegoAct2::e_explaining;
+		StartAction(Act2mainScript::c_tja009ni_RunAnim, TRUE, TRUE, NULL, NULL, NULL);
+
+		AnimationManager()->EnableCamAnims(TRUE);
+		AnimationManager()->FUN_1005f6d0(TRUE);
+		AnimationManager()->FUN_100604f0(g_animationsBricksterIsLoose, sizeOfArray(g_animationsBricksterIsLoose));
+		AnimationManager()->FUN_10060480(g_charactersBricksterIsLoose, sizeOfArray(g_charactersBricksterIsLoose));
+		break;
+	case LegoAct2::e_explaining:
+		m_timeSinceLastStage += 50;
+		break;
+	case LegoAct2::e_goingToResidentialArea:
+		m_timeSinceLastStage += 50;
+
+		if (m_timeSinceLastStage == 20000) {
+			const MxFloat* pepperPosition = FindROI("pepper")->GetWorldPosition();
+			MxFloat otherPoint[] = {-52.0f, 5.25f, -16.5f};
+
+			distance = DISTSQRD3(pepperPosition, otherPoint);
+
+			if (m_infomanDirecting == (Act2mainScript::Script) 0 && distance > 50.0f && pepperPosition[0] > -57.0f) {
+				StartAction(Act2mainScript::c_Avo906In_PlayWav, FALSE, FALSE, NULL, NULL, NULL);
+				m_infomanDirecting = Act2mainScript::c_Avo906In_PlayWav;
+			}
+		}
+		else if (m_timeSinceLastStage >= 90000 && m_timeSinceLastStage % 90000 == 0 && m_infomanDirecting == (Act2mainScript::Script) 0) {
+			StartAction(Act2mainScript::c_Avo908In_PlayWav, FALSE, FALSE, NULL, NULL, NULL);
+			m_infomanDirecting = Act2mainScript::c_Avo908In_PlayWav;
+		}
+
+		break;
+	case LegoAct2::e_atResidentialArea:
+		m_timeSinceLastStage += 50;
+		break;
+	case LegoAct2::e_droppingBrick:
+		m_timeSinceLastStage += 50;
+
+		if (m_timeSinceLastStage >= 200) {
+			if (m_nextBrick < 5) {
+				m_state = LegoAct2::e_chase;
+			}
+			else {
+				m_state = LegoAct2::e_goingToHide;
+				m_timeSinceLastStage = 0;
+				m_ambulanceActor->GoingToHide();
+			}
+		}
+
+		break;
+	case LegoAct2::e_goingToHide:
+		m_timeSinceLastStage += 50;
+		break;
+	case LegoAct2::e_hidden:
+		break;
+	case LegoAct2::e_distributeRemainingBricks:
+		break;
+	}
+
+	return SUCCESS;
+}
+
+// FUNCTION: LEGO1 0x10050380
+// FUNCTION: BETA10 0x1003b049
+MxLong LegoAct2::Notify(MxParam& p_param)
+{
+	MxNotificationParam& param = (MxNotificationParam&) p_param;
+	MxLong result = 0;
+
+	LegoWorld::Notify(p_param);
+
+	if (m_worldStarted) {
+		switch (param.GetNotification()) {
+		case c_notificationEndAction:
+			result = HandleEndAction((MxEndActionNotificationParam&) p_param);
+			break;
+		case c_notificationPathStruct: {
+			MxTrace("trigger %d\n", ((LegoPathStructNotificationParam&) p_param).GetData());
+
+			LegoPathStructNotificationParam& param = (LegoPathStructNotificationParam&) p_param;
+			LegoEntity* entity = (LegoEntity*) param.GetSender();
+
+			if (m_ambulance == NULL) {
+				m_ambulance = FindROI("ambul");
+			}
+
+			if (entity->GetROI() == m_pepper) {
+				HandlePathStruct(param);
+			}
+
+			result = 1;
+			break;
+		}
+		case c_notificationAct2Brick:
+			SoundManager()->GetCacheSoundManager()->Play("28bng", NULL, FALSE);
+
+			m_removedBricks++;
+			if (m_removedBricks == 10 && m_state == LegoAct2::e_brickHunt) {
+				m_state = LegoAct2::e_allPiecesCollected;
+
+				LegoEntity* entity = (LegoEntity*) param.GetSender();
+
+				Mx3DPointFloat pepperToBrick(entity->GetROI()->GetWorldPosition());
+				Mx3DPointFloat pepperPosition(m_pepper->GetWorldPosition());
+				Mx3DPointFloat position(pepperPosition);
+
+				pepperToBrick -= pepperPosition;
+
+				MxMatrix local2world(m_pepper->GetLocal2World());
+				Vector3 right(local2world[0]);
+				Vector3 up(local2world[1]);
+				Vector3 dir(local2world[2]);
+
+				dir = pepperToBrick;
+				dir.Unitize();
+
+				Mx3DPointFloat positionOffset(dir);
+				positionOffset *= 1.25f;
+				position += positionOffset;
+				position[1] += 0.25;
+				right.EqualsCross(up, dir);
+				right.Unitize();
+
+				Mx3DPointFloat direction(local2world[2]);
+				Mx3DPointFloat localc0(local2world[1]);
+				StartAction(Act2mainScript::c_tns051in_RunAnim, TRUE, TRUE, &position, &direction, NULL);
+
+				m_state = LegoAct2::e_allPiecesCollected;
+				m_timeSinceLastStage = 0;
+				((LegoPathActor*) m_pepper->GetEntity())->SetActorState(LegoPathActor::c_disabled);
+			}
+			break;
+		case c_notificationTransitioned:
+			result = HandleTransitionEnd();
+			break;
+		}
+	}
+
+	return result;
+}
+
+// FUNCTION: LEGO1 0x100506f0
+MxLong LegoAct2::HandleEndAction(MxEndActionNotificationParam& p_param)
+{
+	if (m_gameState->m_enabled && p_param.GetAction() != NULL) {
+		MxU32 objectId = p_param.GetAction()->GetObjectId();
+
+		if (m_state == LegoAct2::e_goingToResidentialArea && m_infomanDirecting == objectId) {
+			m_infomanDirecting = (Act2mainScript::Script) 0;
+			return 0;
+		}
+
+		if (m_currentAction != objectId) {
+			return 0;
+		}
+
+		m_currentAction = (Act2mainScript::Script) 0;
+
+		switch (m_state) {
+		case LegoAct2::e_holdingSpeech:
+			m_state = LegoAct2::e_startDescription;
+			break;
+		case LegoAct2::e_explaining:
+			HideMaPaInfo();
+			m_state = LegoAct2::e_goingToResidentialArea;
+			m_timeSinceLastStage = 0;
+			break;
+		case LegoAct2::e_atResidentialArea: {
+			LegoROI* roi;
+
+			roi = FindROI("nick");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("laura");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("motoni");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("motola");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("Block01");
+			RemoveActor((LegoPathActor*) roi->GetEntity());
+			roi->SetVisibility(FALSE);
+
+			roi = FindROI("Block02");
+			RemoveActor((LegoPathActor*) roi->GetEntity());
+			roi->SetVisibility(FALSE);
+
+			VariableTable()->SetVariable("ACTOR_01", "brickstr");
+			InitializeShooting();
+			m_state = LegoAct2::e_chase;
+			PlayMusic(JukeboxScript::c_BrickstrChase);
+			break;
+		}
+		case LegoAct2::e_hidden:
+			m_bricks[m_nextBrick - 1].Mute(TRUE);
+			m_state = LegoAct2::e_distributeRemainingBricks;
+			m_timeSinceLastStage = 0;
+
+			StartAction(Act2mainScript::c_tra045la_RunAnim, TRUE, TRUE, NULL, NULL, NULL);
+			((LegoPathActor*) m_pepper->GetEntity())->SetActorState(LegoPathActor::c_disabled);
+			AnimationManager()->EnableCamAnims(TRUE);
+			AnimationManager()->FUN_1005f6d0(TRUE);
+			AnimationManager()->FUN_100604f0(g_animationsAfterChase, sizeOfArray(g_animationsAfterChase));
+			AnimationManager()->FUN_10060480(g_charactersAfterChase, sizeOfArray(g_charactersAfterChase));
+			break;
+		case LegoAct2::e_distributeRemainingBricks: {
+			LegoROI* roi;
+
+			roi = FindROI("nick");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("laura");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("motoni");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			roi = FindROI("motola");
+			if (roi != NULL) {
+				roi->SetVisibility(FALSE);
+			}
+
+			m_bricks[m_nextBrick - 1].Mute(FALSE);
+			m_state = LegoAct2::e_brickHunt;
+			SpawnBricks();
+			PlayMusic(JukeboxScript::c_BrickHunt);
+			((LegoPathActor*) m_pepper->GetEntity())->SetActorState(LegoPathActor::c_initial);
+			break;
+		}
+		case LegoAct2::e_allPiecesCollected:
+			for (MxS32 i = 0; i < (MxS32) sizeOfArray(m_bricks); i++) {
+				m_bricks[i].Remove();
+			}
+
+			DisableAnimations();
+			m_destLocation = LegoGameState::e_copterbuild;
+			TransitionManager()->StartTransition(MxTransitionManager::e_mosaic, 50, FALSE, FALSE);
+			break;
+		}
+	}
+
+	return 0;
+}
+
+// FUNCTION: LEGO1 0x10050a50
+MxLong LegoAct2::HandleTransitionEnd()
+{
+	if (m_destLocation != LegoGameState::e_undefined) {
+		GameState()->SwitchArea(m_destLocation);
+		m_destLocation = LegoGameState::e_undefined;
+	}
+
+	return 1;
+}
+
+// FUNCTION: LEGO1 0x10050a80
+void LegoAct2::ReadyWorld()
+{
+	LegoWorld::ReadyWorld();
+
+	AnimationManager()->Resume();
+	TickleManager()->RegisterClient(this, 20);
+
+	m_ready = TRUE;
+	m_siFile = VariableTable()->GetVariable("ACT2_ANIMS_FILE");
+
+	GameState()->SetActor(LegoActor::c_pepper);
+	m_pepper = FindROI("pepper");
+	IslePathActor* pepper = (IslePathActor*) m_pepper->GetEntity();
+	pepper->SpawnPlayer(
+		LegoGameState::e_pepperSpawnAct2,
+		TRUE,
+		IslePathActor::c_spawnBit1 | IslePathActor::c_playMusic | IslePathActor::c_spawnBit3
+	);
+
+	LegoROI* roi = FindROI("Block01");
+	BoundingSphere sphere = roi->GetBoundingSphere();
+	sphere.Radius() *= 1.5;
+	roi->SetBoundingSphere(sphere);
+	LegoPathActor* actor = (LegoPathActor*) roi->GetEntity();
+	PlaceActor(actor, "EDG01_04", 1, 0.5f, 3, 0.5f);
+
+	MxMatrix local2world = roi->GetLocal2World();
+	local2world[3][0] -= 1.5;
+	roi->SetLocal2World(local2world);
+	roi->WrappedUpdateWorldData();
+
+	roi = FindROI("Block02");
+	sphere = roi->GetBoundingSphere();
+	sphere.Radius() *= 1.5;
+	roi->SetBoundingSphere(sphere);
+	actor = (LegoPathActor*) roi->GetEntity();
+	PlaceActor(actor, "EDG00_149", 0, 0.5f, 2, 0.5f);
+
+	PlayMusic(JukeboxScript::c_Jail_Music);
+	DisableAnimations();
+	VideoManager()->Get3DManager()->SetFrustrum(90.0f, 0.1f, 250.f);
+	m_gameState->m_enabled = TRUE;
+}
+
+// FUNCTION: LEGO1 0x10050cf0
+// FUNCTION: BETA10 0x1003bb2d
+void LegoAct2::Enable(MxBool p_enable)
+{
+	if ((MxBool) m_disabledObjects.empty() == p_enable) {
+		return;
+	}
+
+	LegoWorld::Enable(p_enable);
+
+	if (p_enable) {
+		m_gameState->m_enabled = TRUE;
+
+		GameState()->SetActor(LegoActor::c_pepper);
+		m_pepper = FindROI("pepper");
+
+		((IslePathActor*) m_pepper->GetEntity())->UpdateWorld(m_transformOnDisable, m_boundaryOnDisable, TRUE);
+
+		if (GameState()->m_previousArea == LegoGameState::e_infomain) {
+			GameState()->StopArea(LegoGameState::e_infomain);
+		}
+
+		Disable(FALSE, LegoOmni::c_disableInput | LegoOmni::c_disable3d | LegoOmni::c_clearScreen);
+
+		if (m_state != LegoAct2::e_atResidentialArea && m_state != LegoAct2::e_distributeRemainingBricks) {
+			PlayMusic(m_music);
+		}
+
+		if (m_state == LegoAct2::e_goingToHide && m_nextBrick == 6 && m_bricks[5].GetROI() != NULL) {
+			m_bricks[5].PlayWhistleSound();
+		}
+		else if (m_state == LegoAct2::e_brickHunt) {
+			InitBricks();
+		}
+
+		TickleManager()->RegisterClient(this, 20);
+		SetAppCursor(e_cursorArrow);
+
+		if (m_state == LegoAct2::e_holdingSpeech || m_state == LegoAct2::e_explaining ||
+			m_state == LegoAct2::e_atResidentialArea || m_state == LegoAct2::e_hidden ||
+			m_state == LegoAct2::e_distributeRemainingBricks || m_state == LegoAct2::e_allPiecesCollected) {
+			MxDSAction action;
+			MxEndActionNotificationParam param(c_notificationEndAction, NULL, &action, FALSE);
+
+			m_currentAction = (Act2mainScript::Script) 0;
+			action.SetObjectId(0);
+			HandleEndAction(param);
+		}
+
+		GameState()->m_isDirty = TRUE;
+	}
+	else {
+		m_transformOnDisable = m_pepper->GetLocal2World();
+		m_boundaryOnDisable = ((LegoPathActor*) m_pepper->GetEntity())->GetBoundary();
+
+		DisableAnimations();
+		BackgroundAudioManager()->Stop();
+		UninitBricks();
+		DeleteObjects(&m_atomId, Act2mainScript::c_VOhead0_PlayWav, Act2mainScript::c_VOhide_PlayWav);
+
+		if (m_infomanDirecting != (Act2mainScript::Script) 0) {
+			MxDSAction action;
+			action.SetAtomId(m_atomId);
+			action.SetUnknown24(-2);
+			action.SetObjectId(m_infomanDirecting);
+			DeleteObject(action);
+			m_infomanDirecting = (Act2mainScript::Script) 0;
+		}
+
+		TickleManager()->UnregisterClient(this);
+	}
+}
+
+// FUNCTION: LEGO1 0x10051460
+// FUNCTION: BETA10 0x1003bb72
+MxLong LegoAct2::HandlePathStruct(LegoPathStructNotificationParam& p_param)
+{
+	if (m_state == LegoAct2::e_goingToResidentialArea && p_param.GetData() == 0x32) {
+		LegoPathActor* actor = (LegoPathActor*) m_pepper->GetEntity();
+		actor->SetActorState(LegoPathActor::c_disabled);
+		actor->SetWorldSpeed(0.0f);
+		DisableAnimations();
+
+		if (m_timeSinceLastStage < 90000) {
+			StartAction(Act2mainScript::c_tra031ni_RunAnim, TRUE, TRUE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_tra032ni_RunAnim, TRUE, TRUE, NULL, NULL, NULL);
+		}
+
+		m_unk0x112c = 50;
+		m_state = LegoAct2::e_atResidentialArea;
+		m_timeSinceLastStage = 0;
+	}
+	else if (m_state == LegoAct2::e_goingToResidentialArea && p_param.GetData() == 0x2a) {
+		if (m_infomanDirecting == (Act2mainScript::Script) 0) {
+			StartAction(Act2mainScript::c_Avo907In_PlayWav, FALSE, FALSE, NULL, NULL, NULL);
+			m_infomanDirecting = Act2mainScript::c_Avo907In_PlayWav;
+		}
+	}
+	else if (m_state == LegoAct2::e_goingToResidentialArea) {
+		CheckBricksterIsLoose(p_param.GetData());
+	}
+	else if (m_state == LegoAct2::e_chase) {
+		CheckBricksterDestroying(p_param.GetData());
+	}
+	else if (m_state == LegoAct2::e_goingToHide && p_param.GetData() == 0x165) {
+		((LegoPathActor*) m_pepper->GetEntity())->SetActorState(LegoPathActor::c_disabled);
+
+		if (StartAction(Act2mainScript::c_VOhide_PlayWav, FALSE, TRUE, NULL, NULL, NULL) == SUCCESS) {
+			m_currentAction = Act2mainScript::c_VOhide_PlayWav;
+		}
+
+		m_ambulanceActor->Hide();
+
+		m_state = LegoAct2::e_hidden;
+		m_timeSinceLastStage = 0;
+
+		if (m_nextBrick < 6) {
+			m_bricks[m_nextBrick].Create(m_nextBrick);
+			m_nextBrick++;
+		}
+
+		MxMatrix local2world = m_ambulance->GetLocal2World();
+		MxMatrix local2world2 = local2world;
+
+		LegoPathBoundary* boundary = m_ambulanceActor->GetBoundary();
+		local2world[3][1] += 1.5;
+		local2world2[3][1] -= 0.1;
+
+		m_bricks[m_nextBrick - 1].Place(local2world, local2world2, boundary);
+	}
+
+	return 0;
+}
+
+// FUNCTION: LEGO1 0x100516b0
+// FUNCTION: BETA10 0x1003bcbc
+MxResult LegoAct2::CreateDroppingBrick()
+{
+	if (m_nextBrick > 4) {
+		return FAILURE;
+	}
+
+	Act2Brick& brick = m_bricks[m_nextBrick];
+	brick.Create(m_nextBrick);
+
+	MxMatrix local2world = m_ambulance->GetLocal2World();
+	MxMatrix local2world2 = local2world;
+
+	LegoPathBoundary* boundary = m_ambulanceActor->GetBoundary();
+	local2world[3][1] += 1.3;
+	local2world2[3][1] -= 0.1;
+
+	brick.Place(local2world, local2world2, boundary);
+	m_nextBrick++;
+	m_state = LegoAct2::e_droppingBrick;
+	m_timeSinceLastStage = 0;
+	return SUCCESS;
+}
+
+// FUNCTION: LEGO1 0x100517b0
+void LegoAct2::CreateBrick()
+{
+	Act2Brick& brick = m_bricks[m_nextBrick];
+	brick.Create(m_nextBrick);
+
+	MxMatrix local2world = m_ambulance->GetLocal2World();
+	local2world[3][1] += 1.5;
+
+	LegoROI* roi = brick.GetROI();
+	roi->SetLocal2World(local2world);
+	roi->WrappedUpdateWorldData();
+	brick.PlayWhistleSound();
+	m_nextBrick++;
+}
+
+// FUNCTION: LEGO1 0x10051840
+void LegoAct2::PlayMusic(JukeboxScript::Script p_objectId)
+{
+	MxDSAction action;
+	action.SetAtomId(*g_jukeboxScript);
+	action.SetObjectId(p_objectId);
+
+	BackgroundAudioManager()->PlayMusic(action, 5, MxPresenter::e_repeating);
+	m_music = p_objectId;
+}
+
+// FUNCTION: LEGO1 0x10051900
+// FUNCTION: BETA10 0x1003bed1
+void LegoAct2::DisableAnimations()
+{
+	if (AnimationManager()) {
+		AnimationManager()->Suspend();
+		AnimationManager()->Resume();
+		AnimationManager()->FUN_10060540(FALSE);
+		AnimationManager()->FUN_100604d0(FALSE);
+		AnimationManager()->EnableCamAnims(FALSE);
+		AnimationManager()->FUN_1005f6d0(FALSE);
+	}
+}
+
+// FUNCTION: LEGO1 0x10051960
+// FUNCTION: BETA10 0x1003bf2c
+void LegoAct2::HideMaPaInfo()
+{
+	LegoROI* roi;
+
+	roi = FindROI("mama");
+	if (roi != NULL) {
+		roi->SetVisibility(FALSE);
+	}
+
+	roi = FindROI("papa");
+	if (roi != NULL) {
+		roi->SetVisibility(FALSE);
+	}
+
+	roi = FindROI("infoman");
+	if (roi != NULL) {
+		roi->SetVisibility(FALSE);
+	}
+
+	((LegoPathActor*) m_pepper->GetEntity())->SetActorState(LegoPathActor::c_initial);
+}
+
+// FUNCTION: LEGO1 0x100519c0
+void LegoAct2::VTable0x60()
+{
+	// empty
+}
+
+// FUNCTION: LEGO1 0x100519d0
+MxBool LegoAct2::Escape()
+{
+	BackgroundAudioManager()->Stop();
+	AnimationManager()->FUN_10061010(FALSE);
+	DeleteObjects(&m_atomId, Act2mainScript::c_snsx50bu_RunAnim, 999);
+
+	if (UserActor() != NULL) {
+		if (UserActor()->GetActorId() != GameState()->GetActorId()) {
+			((IslePathActor*) UserActor())->Exit();
+		}
+	}
+
+	if (m_gameState != NULL) {
+		m_gameState->m_enabled = FALSE;
+	}
+
+	m_destLocation = LegoGameState::e_infomain;
+	return TRUE;
+}
+
+// FUNCTION: LEGO1 0x10051a60
+void LegoAct2::InitBricks()
+{
+	for (MxS32 i = 0; i < (MxS32) sizeOfArray(m_bricks); i++) {
+		if (m_bricks[i].GetROI() != NULL && m_bricks[i].GetROI()->GetVisibility()) {
+			m_bricks[i].PlayWhistleSound();
+		}
+	}
+}
+
+// FUNCTION: LEGO1 0x10051a90
+void LegoAct2::UninitBricks()
+{
+	for (MxS32 i = 0; i < (MxS32) sizeOfArray(m_bricks); i++) {
+		if (m_bricks[i].GetROI() != NULL) {
+			m_bricks[i].StopWhistleSound();
+		}
+	}
+}
+
+// FUNCTION: LEGO1 0x10051ac0
+// FUNCTION: BETA10 0x100138c0
+void LegoAct2::SpawnBricks()
+{
+	MxFloat infobridge[] = {79.0625f, 0.5f, -19.75f};
+	MxFloat palmTreeInPark[] = {67.62728f, 0.917197f, 11.49833f};
+	MxFloat store[] = {-53.9328f, 2.372259f, -61.2073f};
+	MxFloat postOffice[] = {-30.9856f, 0.30453f, -47.4378f};
+	MxFloat h3[] = {-71.2397f, 7.319758f, -23.0f};
+	MxFloat ht[] = {-59.5102f, 14.37329f, 24.70311f};
+	MxFloat posta[] = {74.0625f, 1.5f, -91.125f};
+	MxFloat ptree[] = {-20.4375f, 0.5f, -82.5625f};
+	MxFloat jail[] = {80.46174f, 0.6f, -59.50533f};
+	MxFloat hospital[] = {84.0f, 4.5f, 26.0f};
+
+	InitBricks();
+
+	Act2Brick* brick = &m_bricks[m_nextBrick];
+	brick->Create(m_nextBrick);
+	LegoROI* roi = brick->GetROI();
+	MxMatrix local2world = roi->GetLocal2World();
+	MxFloat* location;
+
+	// Unused but present in BETA
+	LegoEntity* entity;
+
+	if (SDL_rand(2) == 1) {
+		m_firstBrick = 0;
+		location = infobridge;
+		MxTrace("infobridge\n");
+	}
+	else {
+		m_firstBrick = 1;
+		location = palmTreeInPark;
+		MxTrace("palm tree in park\n");
+	}
+
+	SET3(local2world[3], location);
+	roi->SetLocal2World(local2world);
+	roi->SetVisibility(TRUE);
+	roi->WrappedUpdateWorldData();
+	entity = roi->GetEntity();
+	brick->PlayWhistleSound();
+	m_nextBrick++;
+
+	brick = &m_bricks[m_nextBrick];
+	brick->Create(m_nextBrick);
+	roi = brick->GetROI();
+	local2world = roi->GetLocal2World();
+
+	if (SDL_rand(2) == 1) {
+		m_secondBrick = 2;
+		location = store;
+		MxTrace("store\n");
+	}
+	else {
+		m_secondBrick = 3;
+		location = postOffice;
+		MxTrace("p.o.\n");
+	}
+
+	SET3(local2world[3], location);
+	roi->SetLocal2World(local2world);
+	roi->SetVisibility(TRUE);
+	roi->WrappedUpdateWorldData();
+	entity = roi->GetEntity();
+	brick->PlayWhistleSound();
+	m_nextBrick++;
+
+	brick = &m_bricks[m_nextBrick];
+	brick->Create(m_nextBrick);
+	roi = brick->GetROI();
+	local2world = roi->GetLocal2World();
+
+	if (SDL_rand(2) == 1) {
+		m_thirdBrick = 4;
+		location = h3;
+		MxTrace("h3\n");
+	}
+	else {
+		m_thirdBrick = 5;
+		location = ht;
+		MxTrace("ht\n");
+	}
+
+	SET3(local2world[3], location);
+	roi->SetLocal2World(local2world);
+	roi->SetVisibility(TRUE);
+	roi->WrappedUpdateWorldData();
+	entity = roi->GetEntity();
+	brick->PlayWhistleSound();
+	m_nextBrick++;
+
+	brick = &m_bricks[m_nextBrick];
+	brick->Create(m_nextBrick);
+	roi = brick->GetROI();
+	local2world = roi->GetLocal2World();
+
+	if (SDL_rand(2) == 1) {
+		if (SDL_rand(2) == 1) {
+			m_fourthBrick = 6;
+			location = posta;
+			MxTrace("po.sta.\n");
+		}
+		else {
+			m_fourthBrick = 7;
+			location = ptree;
+			MxTrace("p.tree\n");
+		}
+	}
+	else {
+		if (SDL_rand(2) == 1) {
+			m_fourthBrick = 8;
+			location = jail;
+			MxTrace("jail\n");
+		}
+		else {
+			m_fourthBrick = 9;
+			location = hospital;
+			MxTrace("hospi\n");
+		}
+	}
+
+	SET3(local2world[3], location);
+	roi->SetLocal2World(local2world);
+	roi->SetVisibility(TRUE);
+	roi->WrappedUpdateWorldData();
+	entity = roi->GetEntity();
+	brick->PlayWhistleSound();
+	m_nextBrick++;
+}
+
+// FUNCTION: LEGO1 0x10051f20
+// FUNCTION: BETA10 0x10013f48
+MxResult LegoAct2::BadEnding()
+{
+	for (MxS32 i = 0; i < (MxS32) sizeOfArray(m_bricks); i++) {
+		m_bricks[i].Remove();
+	}
+
+	LegoPathActor* actor = m_ambulanceActor;
+	actor->SetActorState(LegoPathActor::c_disabled);
+
+	m_gameState->SetState(LegoAct2State::c_badEnding);
+	m_destLocation = LegoGameState::e_infomain;
+	TransitionManager()->StartTransition(MxTransitionManager::e_mosaic, 50, FALSE, FALSE);
+
+	MxTrace("Bad End of Act2\n");
+	m_state = LegoAct2::e_allPiecesCollected;
+	EmitGameEvent(e_badEnding);
+	return SUCCESS;
+}
+
+// FUNCTION: LEGO1 0x10051fa0
+// FUNCTION: BETA10 0x10013fd3
+void LegoAct2::CheckBricksterDestroying(MxS32 p_pathData)
+{
+	MxU8 randN = SDL_rand(3);
+	randN++;
+
+	switch (p_pathData) {
+	case 2:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx50bu_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx51bu_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 8:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx29nu_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx30nu_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 9:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx33na_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx34na_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 14:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx46cl_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx48cl_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 23:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx58va_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx60va_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 24:
+	case 25:
+		StartAction(Act2mainScript::c_snsx31sh_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		break;
+	case 26:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx52sn_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx53sn_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 34:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx15la_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx16la_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 36:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx10ni_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx11ni_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	case 38:
+	case 42:
+		if (randN == 1) {
+			StartAction(Act2mainScript::c_snsx03ma_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		else {
+			StartAction(Act2mainScript::c_snsx04ma_RunAnim, TRUE, FALSE, NULL, NULL, NULL);
+		}
+		break;
+	}
+}
+
+// FUNCTION: LEGO1 0x100521f0
+// FUNCTION: BETA10 0x100142f1
+void LegoAct2::CheckBricksterIsLoose(MxS32 p_pathData)
+{
+	Act2mainScript::Script objectId = (Act2mainScript::Script) 0;
+	Mx3DPointFloat actorPosition;
+
+	switch (p_pathData) {
+	case 0x02: {
+		actorPosition = Mx3DPointFloat(-9.1f, 0.0f, -16.5f);
+		VariableTable()->SetVariable("ACTOR_01", "bd");
+		objectId = Act2mainScript::c_tns030bd_RunAnim;
+		break;
+	}
+	case 0x2a: {
+		actorPosition = Mx3DPointFloat(-9.67f, 0.0f, -44.3f);
+		VariableTable()->SetVariable("ACTOR_01", "rd");
+		objectId = Act2mainScript::c_tns030rd_RunAnim;
+		break;
+	}
+	case 0x133: {
+		actorPosition = Mx3DPointFloat(25.75f, 0.0f, -13.0f);
+		VariableTable()->SetVariable("ACTOR_01", "pg");
+		objectId = Act2mainScript::c_tns030pg_RunAnim;
+		break;
+	}
+	case 0x134: {
+		actorPosition = Mx3DPointFloat(43.63f, 0.0f, -46.33f);
+		VariableTable()->SetVariable("ACTOR_01", "sy");
+		objectId = Act2mainScript::c_tns030sy_RunAnim;
+		break;
+	}
+	case 0x135: {
+		actorPosition = Mx3DPointFloat(50.0f, 0.0f, -34.6f);
+		VariableTable()->SetVariable("ACTOR_01", "rd");
+		objectId = Act2mainScript::c_tns030rd_RunAnim;
+		break;
+	}
+	case 0x138: {
+		actorPosition = Mx3DPointFloat(-41.15f, 4.0f, 31.0f);
+		VariableTable()->SetVariable("ACTOR_01", "sy");
+		objectId = Act2mainScript::c_tns030sy_RunAnim;
+		break;
+	}
+	}
+
+	if (objectId != (Act2mainScript::Script) 0) {
+		Mx3DPointFloat lookingAtPepper(actorPosition);
+		Mx3DPointFloat position(m_pepper->GetWorldPosition());
+		lookingAtPepper -= position;
+		Mx3DPointFloat local44 = lookingAtPepper;
+		lookingAtPepper.Unitize();
+		StartAction(objectId, TRUE, TRUE, &actorPosition, &lookingAtPepper, NULL);
+	}
+}
+
+// FUNCTION: LEGO1 0x10052560
+// FUNCTION: BETA10 0x100145c6
+MxResult LegoAct2::StartAction(
+	Act2mainScript::Script p_objectId,
+	MxBool p_isAnimation,
+	MxBool p_ignoreCurrentAction,
+	Mx3DPointFloat* p_location,
+	Mx3DPointFloat* p_direction,
+	Mx3DPointFloat* p_up
+)
+{
+	if (m_currentAction == (Act2mainScript::Script) 0 || p_ignoreCurrentAction) {
+		assert(strlen(m_siFile));
+
+		if (!p_isAnimation) {
+			MxDSAction action;
+
+			action.SetObjectId(p_objectId);
+			// World index: see LegoOmni::RegisterWorlds
+			action.SetAtomId(*Lego()->GetWorldAtom(LegoOmni::e_act2));
+
+			if (p_location) {
+				action.SetUp(Mx3DPointFloat(0.0f, 1.0f, 0.0f));
+				action.SetLocation(*p_location);
+			}
+
+			if (p_direction) {
+				action.SetDirection(*p_direction);
+			}
+
+			StartActionIfInitialized(action);
+		}
+		else {
+			MxMatrix matrix;
+
+			matrix.SetIdentity();
+			MxBool oneVectorNotNull = FALSE;
+
+			if (p_location) {
+				matrix[3][0] = (*p_location)[0];
+				matrix[3][1] = (*p_location)[1];
+				matrix[3][2] = (*p_location)[2];
+				oneVectorNotNull = TRUE;
+			}
+
+			if (p_direction) {
+				matrix[2][0] = (*p_direction)[0];
+				matrix[2][1] = (*p_direction)[1];
+				matrix[2][2] = (*p_direction)[2];
+				oneVectorNotNull = TRUE;
+			}
+
+			if (p_up) {
+				matrix[1][0] = (*p_up)[0];
+				matrix[1][1] = (*p_up)[1];
+				matrix[1][2] = (*p_up)[2];
+				oneVectorNotNull = TRUE;
+			}
+
+			Vector3 right(matrix[0]);
+			Vector3 up(matrix[1]);
+			Vector3 dir(matrix[2]);
+
+			right.EqualsCross(up, dir);
+			right.Unitize();
+
+			MxMatrix* pmatrix = NULL;
+
+			if (oneVectorNotNull) {
+				pmatrix = &matrix;
+			}
+
+			MxResult result;
+
+			if (p_objectId == Act2mainScript::c_tja009ni_RunAnim) {
+				result = AnimationManager()->FUN_10060dc0(
+					p_objectId,
+					pmatrix,
+					TRUE,
+					LegoAnimationManager::e_unk0,
+					NULL,
+					TRUE,
+					TRUE,
+					TRUE,
+					TRUE
+				);
+			}
+			else {
+				result = AnimationManager()->FUN_10060dc0(
+					p_objectId,
+					pmatrix,
+					TRUE,
+					LegoAnimationManager::e_unk0,
+					NULL,
+					TRUE,
+					TRUE,
+					TRUE,
+					FALSE
+				);
+			}
+
+			if (result == SUCCESS) {
+				m_currentAction = p_objectId;
+			}
+		}
+	}
+
+	return SUCCESS;
+}
+
+// FUNCTION: LEGO1 0x10052800
+// FUNCTION: BETA10 0x10014aa8
+MxResult LegoAct2::InitializeShooting()
+{
+	LegoPathActor* actor = m_ambulanceActor;
+	LegoLocomotionAnimPresenter* ap;
+
+	PlaceActor(actor, "EDG01_27", 2, 0.5f, 0, 0.5f);
+
+	ap = (LegoLocomotionAnimPresenter*) Find("LegoAnimPresenter", "Ambul_Anim0");
+	assert(ap);
+	ap->CreateROIAndBuildMap(m_ambulanceActor, 0.0f);
+
+	ap = (LegoLocomotionAnimPresenter*) Find("LegoAnimPresenter", "Ambul_Anim2");
+	assert(ap);
+	ap->CreateROIAndBuildMap(m_ambulanceActor, 6.0f);
+
+	ap = (LegoLocomotionAnimPresenter*) Find("LegoAnimPresenter", "Ambul_Anim3");
+	assert(ap);
+	ap->CreateROIAndBuildMap(m_ambulanceActor, 3.0f);
+
+	ap = (LegoLocomotionAnimPresenter*) Find("LegoAnimPresenter", "BrShoot");
+	assert(ap);
+	ap->CreateROIAndBuildMap(m_ambulanceActor, -1.0f);
+
+	actor->SetWorldSpeed(0.0f);
+	m_ambulanceActor->InitializeNextShot();
+	return SUCCESS;
+}

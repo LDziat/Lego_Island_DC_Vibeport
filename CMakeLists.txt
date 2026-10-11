@@ -63,6 +63,7 @@ if (DREAMCAST)
   add_compile_definitions(__DREAMCAST__)
   add_compile_definitions(NDEBUG)
   include_directories("/opt/toolchains/dc/kos-ports/include/SDL")
+  add_compile_options(-O3 -ffast-math -fno-math-errno -mfsrra -mfsca)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")

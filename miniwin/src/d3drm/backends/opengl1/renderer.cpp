@@ -82,10 +82,16 @@ OpenGL1Renderer::~OpenGL1Renderer()
 
 void OpenGL1Renderer::PushLights(const SceneLight* lightsArray, size_t count)
 {
+#ifdef __DREAMCAST__
+	if (count > 2) {
+		count = 2;
+	}
+#else
 	if (count > 8) {
 		SDL_Log("Unsupported number of lights (%d)", static_cast<int>(count));
 		count = 8;
 	}
+#endif
 
 	m_lights.assign(lightsArray, lightsArray + count);
 }

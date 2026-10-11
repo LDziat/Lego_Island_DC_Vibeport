@@ -27,44 +27,9 @@ Direct3DRMViewportImpl::~Direct3DRMViewportImpl()
 	}
 }
 
-static void D3DRMMatrixMultiply(D3DRMMATRIX4D out, const D3DRMMATRIX4D a, const D3DRMMATRIX4D b)
+static inline void D3DRMMatrixMultiply(D3DRMMATRIX4D out, const D3DRMMATRIX4D a, const D3DRMMATRIX4D b)
 {
-	for (int i = 0; i < 4; ++i) {
-		for (int j = 0; j < 4; ++j) {
-			out[i][j] = 0.0f;
-			for (int k = 0; k < 4; ++k) {
-				out[i][j] += a[i][k] * b[k][j];
-			}
-		}
-	}
-}
-
-static void D3DRMMatrixInvertForNormal(Matrix3x3 out, const D3DRMMATRIX4D m)
-{
-	float a = m[0][0], b = m[0][1], c = m[0][2];
-	float d = m[1][0], e = m[1][1], f = m[1][2];
-	float g = m[2][0], h = m[2][1], i = m[2][2];
-
-	float det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-
-	if (fabs(det) < 1e-6f) {
-		memset(out, 0, sizeof(Matrix3x3));
-		return;
-	}
-
-	float invDet = 1.0f / det;
-
-	out[0][0] = (e * i - f * h) * invDet;
-	out[1][0] = (c * h - b * i) * invDet;
-	out[2][0] = (b * f - c * e) * invDet;
-
-	out[0][1] = (f * g - d * i) * invDet;
-	out[1][1] = (a * i - c * g) * invDet;
-	out[2][1] = (c * d - a * f) * invDet;
-
-	out[0][2] = (d * h - e * g) * invDet;
-	out[1][2] = (b * g - a * h) * invDet;
-	out[2][2] = (a * e - b * d) * invDet;
+	MultiplyMatrix(out, a, b);
 }
 
 static void D3DRMMatrixInvertOrthogonal(D3DRMMATRIX4D out, const D3DRMMATRIX4D m)
@@ -193,42 +158,37 @@ bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMat
 		{box.max.x, box.max.y, box.max.z},
 	};
 
+	float nearZ = -frustumPlanes[4].d;
+	float farZ = frustumPlanes[5].d;
+	float minZ = 1e9f, maxZ = -1e9f;
 	bool straddlesNear = false;
+
 	for (D3DVECTOR& corner : boxCorners) {
 		corner = TransformPoint(corner, worldViewMatrix);
-		if (corner.z <= -frustumPlanes[4].d) {
+		if (corner.z < minZ) minZ = corner.z;
+		if (corner.z > maxZ) maxZ = corner.z;
+		if (corner.z <= nearZ) {
 			straddlesNear = true;
 		}
 	}
 
-	// 1. Test Near (plane 4) and Far (plane 5)
-	for (int i = 4; i < 6; ++i) {
-		const Plane& plane = frustumPlanes[i];
-		int out = 0;
-		for (int j = 0; j < 8; ++j) {
-			const D3DVECTOR& corner = boxCorners[j];
-			float dist = plane.normal.x * corner.x + plane.normal.y * corner.y + plane.normal.z * corner.z + plane.d;
-			if (dist < 0.0f) {
-				++out;
-			}
-		}
-		if (out == 8) {
-			return false;
-		}
+	// 1. Fast Near and Far plane test
+	if (maxZ < nearZ || minZ > farZ) {
+		return false;
 	}
 
 	// 2. Test side planes (0..3) ONLY if the box does not straddle behind the near plane.
-	// Side plane equations radiate from (0,0,0) and invert for negative view-space Z,
-	// which would falsely cull large meshes (like island terrain) surrounding the camera.
 	if (!straddlesNear) {
 		for (int i = 0; i < 4; ++i) {
 			const Plane& plane = frustumPlanes[i];
 			int out = 0;
 			for (int j = 0; j < 8; ++j) {
 				const D3DVECTOR& corner = boxCorners[j];
-				float dist = plane.normal.x * corner.x + plane.normal.y * corner.y + plane.normal.z * corner.z + plane.d;
+				float dist = plane.normal.x * corner.x + plane.normal.y * corner.y + plane.normal.z * corner.z;
 				if (dist < 0.0f) {
 					++out;
+				} else {
+					break; // At least one corner inside, cannot be outside this plane
 				}
 			}
 			if (out == 8) {
@@ -250,13 +210,6 @@ inline D3DRMVECTOR4D TransformPoint4(const D3DRMVECTOR4D& p, const D3DRMMATRIX4D
 	};
 }
 
-float CalculateDepth(const D3DRMMATRIX4D& viewProj, const D3DRMMATRIX4D& worldMatrix)
-{
-	D3DRMVECTOR4D position = {worldMatrix[3][0], worldMatrix[3][1], worldMatrix[3][2], 1.0f};
-	D3DRMVECTOR4D clipPos = TransformPoint4(position, viewProj);
-	return (clipPos.z / clipPos.w + 1.0f) * 0.5f;
-}
-
 void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3DRMMATRIX4D parentMatrix)
 {
 	Direct3DRMFrameImpl* frameImpl = static_cast<Direct3DRMFrameImpl*>(frame);
@@ -264,34 +217,32 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 	memcpy(localMatrix, frameImpl->m_transform, sizeof(D3DRMMATRIX4D));
 
 	D3DRMMATRIX4D worldMatrix;
-	D3DRMMatrixMultiply(worldMatrix, parentMatrix, localMatrix);
-
-	Matrix3x3 worldMatrixInvert;
-	D3DRMMatrixInvertForNormal(worldMatrixInvert, worldMatrix);
+	MultiplyMatrix(worldMatrix, parentMatrix, localMatrix);
 
 	IDirect3DRMVisualArray* visuals = nullptr;
 	frame->GetVisuals(&visuals);
-	DWORD n = visuals->GetSize();
+	DWORD n = visuals ? visuals->GetSize() : 0;
 	for (DWORD i = 0; i < n; ++i) {
 		IDirect3DRMVisual* visual = nullptr;
 		visuals->GetElement(i, &visual);
+		if (!visual) {
+			continue;
+		}
 
-		IDirect3DRMFrame* childFrame = nullptr;
-		visual->QueryInterface(IID_IDirect3DRMFrame, (void**) &childFrame);
+		IDirect3DRMFrame* childFrame = visual->AsFrame();
 		if (childFrame) {
 			CollectMeshesFromFrame(childFrame, worldMatrix);
-			childFrame->Release();
 			visual->Release();
 			continue;
 		}
 
-		Direct3DRMMeshImpl* mesh = nullptr;
-		visual->QueryInterface(IID_IDirect3DRMMesh, (void**) &mesh);
-		if (mesh) {
+		IDirect3DRMMesh* meshInterface = visual->AsMesh();
+		if (meshInterface) {
+			Direct3DRMMeshImpl* mesh = static_cast<Direct3DRMMeshImpl*>(meshInterface);
 			D3DRMMATRIX4D modelViewMatrix;
 			MultiplyMatrix(modelViewMatrix, worldMatrix, m_viewMatrix);
 
-			// Distance culling for small props / actors / NPCs
+			// Tiered distance culling
 			D3DRMBOX box;
 			mesh->GetBox(&box);
 			bool isValidBox = (box.min.x <= box.max.x && box.min.y <= box.max.y && box.min.z <= box.max.z);
@@ -300,19 +251,39 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 				float extentY = box.max.y - box.min.y;
 				float extentZ = box.max.z - box.min.z;
 				float sizeSq = extentX * extentX + extentY * extentY + extentZ * extentZ;
-				// If bounding diameter < 30 units (actors, vehicles, props)
-				if (sizeSq < (30.0f * 30.0f)) {
-					float vx = modelViewMatrix[3][0];
-					float vy = modelViewMatrix[3][1];
-					float vz = modelViewMatrix[3][2];
-					float distSq = vx * vx + vy * vy + vz * vz;
-					// Cull objects beyond 100 units from the camera
-					if (distSq > (100.0f * 100.0f)) {
-						mesh->Release();
-						visual->Release();
-						continue;
-					}
+				float vx = modelViewMatrix[3][0];
+				float vy = modelViewMatrix[3][1];
+				float vz = modelViewMatrix[3][2];
+				float distSq = vx * vx + vy * vy + vz * vz;
+
+#ifdef __DREAMCAST__
+				// Tier 1: Tiny parts / accessories / small bricks (size < 6): cull beyond 40
+				if (sizeSq < (6.0f * 6.0f) && distSq > (40.0f * 40.0f)) {
+					visual->Release();
+					continue;
 				}
+				// Tier 2: Small props, flowers, minifig parts (size < 18): cull beyond 70
+				if (sizeSq < (18.0f * 18.0f) && distSq > (70.0f * 70.0f)) {
+					visual->Release();
+					continue;
+				}
+				// Tier 3: Medium scenery, trees, streetlamps, vehicles (size < 40): cull beyond 120
+				if (sizeSq < (40.0f * 40.0f) && distSq > (120.0f * 120.0f)) {
+					visual->Release();
+					continue;
+				}
+				// Tier 4: Large scenery / buildings (size < 120): cull beyond 220
+				if (sizeSq < (120.0f * 120.0f) && distSq > (220.0f * 220.0f)) {
+					visual->Release();
+					continue;
+				}
+				// Island terrain meshes have size > 150-200, so they are never distance-culled!
+#else
+				if (sizeSq < (30.0f * 30.0f) && distSq > (100.0f * 100.0f)) {
+					visual->Release();
+					continue;
+				}
+#endif
 			}
 
 			if (IsMeshInFrustum(mesh, modelViewMatrix, m_frustumPlanes)) {
@@ -327,6 +298,7 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 						meshGroup.quality == D3DRMRENDER_FLAT || meshGroup.quality == D3DRMRENDER_UNLITFLAT
 					};
 
+					static const Matrix3x3 dummyNormalMatrix = {};
 					if (appearance.color.unused != 255) {
 						m_deferredDraws.push_back(
 							{m_renderer->GetMeshId(mesh, &meshGroup),
@@ -334,11 +306,10 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 							 {},
 							 {},
 							 appearance,
-							 CalculateDepth(m_viewProjectionwMatrix, worldMatrix)}
+							 modelViewMatrix[3][2]}
 						);
 						memcpy(m_deferredDraws.back().modelViewMatrix, modelViewMatrix, sizeof(D3DRMMATRIX4D));
 						memcpy(m_deferredDraws.back().worldMatrix, worldMatrix, sizeof(D3DRMMATRIX4D));
-						memcpy(m_deferredDraws.back().normalMatrix, worldMatrixInvert, sizeof(Matrix3x3));
 					}
 					else {
 						m_renderer->SubmitDraw(
@@ -346,17 +317,18 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 							modelViewMatrix,
 							worldMatrix,
 							m_viewMatrix,
-							worldMatrixInvert,
+							dummyNormalMatrix,
 							appearance
 						);
 					}
 				}
 			}
-			mesh->Release();
 		}
 		visual->Release();
 	}
-	visuals->Release();
+	if (visuals) {
+		visuals->Release();
+	}
 }
 
 HRESULT Direct3DRMViewportImpl::RenderScene()
@@ -384,23 +356,25 @@ HRESULT Direct3DRMViewportImpl::RenderScene()
 
 	CollectMeshesFromFrame(m_rootFrame, identity);
 
-	std::sort(
-		m_deferredDraws.begin(),
-		m_deferredDraws.end(),
-		[](const DeferredDrawCommand& a, const DeferredDrawCommand& b) { return a.depth > b.depth; }
-	);
-	m_renderer->EnableTransparency();
-	for (const DeferredDrawCommand& cmd : m_deferredDraws) {
-		m_renderer->SubmitDraw(
-			cmd.meshId,
-			cmd.modelViewMatrix,
-			cmd.worldMatrix,
-			m_viewMatrix,
-			cmd.normalMatrix,
-			cmd.appearance
+	if (!m_deferredDraws.empty()) {
+		std::sort(
+			m_deferredDraws.begin(),
+			m_deferredDraws.end(),
+			[](const DeferredDrawCommand& a, const DeferredDrawCommand& b) { return a.depth > b.depth; }
 		);
+		m_renderer->EnableTransparency();
+		for (const DeferredDrawCommand& cmd : m_deferredDraws) {
+			m_renderer->SubmitDraw(
+				cmd.meshId,
+				cmd.modelViewMatrix,
+				cmd.worldMatrix,
+				m_viewMatrix,
+				cmd.normalMatrix,
+				cmd.appearance
+			);
+		}
+		m_deferredDraws.clear();
 	}
-	m_deferredDraws.clear();
 
 	return m_renderer->FinalizeFrame();
 }

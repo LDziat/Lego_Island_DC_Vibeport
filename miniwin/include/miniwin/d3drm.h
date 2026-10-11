@@ -161,7 +161,13 @@ struct IDirect3DRMObject : virtual public IUnknown {
 	virtual HRESULT GetName(DWORD* size, char* name) = 0;
 };
 
-struct IDirect3DRMVisual : public IDirect3DRMObject {};
+struct IDirect3DRMFrame;
+struct IDirect3DRMMesh;
+
+struct IDirect3DRMVisual : public IDirect3DRMObject {
+	virtual IDirect3DRMFrame* AsFrame() { return nullptr; }
+	virtual IDirect3DRMMesh* AsMesh() { return nullptr; }
+};
 typedef IDirect3DRMVisual* LPDIRECT3DRMVISUAL;
 
 struct IDirect3DRMTexture : public IDirect3DRMVisual {
@@ -178,6 +184,7 @@ struct IDirect3DRMMaterial : public IDirect3DRMObject {
 typedef IDirect3DRMMaterial *LPDIRECT3DRMMATERIAL, **LPLPDIRECT3DRMMATERIAL;
 
 struct IDirect3DRMMesh : public IDirect3DRMVisual {
+	IDirect3DRMMesh* AsMesh() override { return this; }
 	virtual HRESULT Clone(int flags, GUID iid, void** object) = 0;
 	virtual HRESULT GetBox(D3DRMBOX* box) = 0;
 	virtual HRESULT AddGroup(
@@ -235,6 +242,7 @@ struct IDirect3DRMVisualArray : public IDirect3DRMArray {
 
 typedef struct IDirect3DRMFrameArray* LPDIRECT3DRMFRAMEARRAY;
 struct IDirect3DRMFrame : public IDirect3DRMVisual {
+	IDirect3DRMFrame* AsFrame() override { return this; }
 	virtual HRESULT AddChild(IDirect3DRMFrame* child) = 0;
 	virtual HRESULT DeleteChild(IDirect3DRMFrame* child) = 0;
 	virtual HRESULT SetSceneBackgroundRGB(float r, float g, float b) = 0;

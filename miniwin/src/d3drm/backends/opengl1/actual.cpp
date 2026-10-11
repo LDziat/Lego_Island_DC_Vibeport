@@ -202,6 +202,10 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	glEnable(GL_COLOR_MATERIAL);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
+	glFrontFace(GL_CW);
+
 	s_currentShadeModel = 0;
 	s_currentBoundTexId = 0xFFFFFFFF;
 	s_currentTex2DEnabled = false;
@@ -216,7 +220,13 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 		glDisable(GL_LIGHT0 + i);
 	}
 
+#ifdef __DREAMCAST__
+	glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_FALSE);
+	const GLfloat defaultAmbient[4] = {0.25f, 0.25f, 0.25f, 1.0f};
+	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, defaultAmbient);
+#else
 	glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
+#endif
 
 	// Projection and view
 	glMatrixMode(GL_PROJECTION);
@@ -234,26 +244,35 @@ void GL11_UploadLight(int lightIdx, GL11_BridgeSceneLight* l)
 	const FColor& c = l->color;
 	GLfloat col[4] = {c.r, c.g, c.b, c.a};
 	const GLfloat zeroAmbient[4] = {0.f, 0.f, 0.f, 1.f};
+	const GLfloat black[4] = {0.f, 0.f, 0.f, 1.f};
 
 	if (l->positional == 0.f && l->directional == 0.f) {
 		// Ambient light only
+#ifdef __DREAMCAST__
+		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, col);
+		return;
+#else
 		glLightfv(lightId, GL_AMBIENT, col);
-		const GLfloat black[4] = {0.f, 0.f, 0.f, 1.f};
 		glLightfv(lightId, GL_DIFFUSE, black);
 		glLightfv(lightId, GL_SPECULAR, black);
 		const GLfloat dummyPos[4] = {0.f, 0.f, 1.f, 0.f};
 		glLightfv(lightId, GL_POSITION, dummyPos);
+#endif
 	}
 	else {
 		glLightfv(lightId, GL_AMBIENT, zeroAmbient);
 		glLightfv(lightId, GL_DIFFUSE, col);
+#ifdef __DREAMCAST__
+		// Matte Lego bricks on Dreamcast: skip expensive per-vertex specular calculations
+		glLightfv(lightId, GL_SPECULAR, black);
+#else
 		if (l->directional == 1.0f) {
 			glLightfv(lightId, GL_SPECULAR, col);
 		}
 		else {
-			const GLfloat black[4] = {0.f, 0.f, 0.f, 1.f};
 			glLightfv(lightId, GL_SPECULAR, black);
 		}
+#endif
 
 		GLfloat pos[4];
 		if (l->directional == 1.f) {
@@ -295,7 +314,6 @@ void GL11_SubmitDraw(
 	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.unused);
 #else
 	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.a);
-#endif
 
 	if (s_currentShininess != appearance.shininess) {
 		if (appearance.shininess != 0.0f) {
@@ -310,6 +328,7 @@ void GL11_SubmitDraw(
 		}
 		s_currentShininess = appearance.shininess;
 	}
+#endif
 
 	GLenum neededShade = mesh.flat ? GL_FLAT : GL_SMOOTH;
 	if (s_currentShadeModel != neededShade) {

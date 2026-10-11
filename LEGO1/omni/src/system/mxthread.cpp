@@ -58,11 +58,23 @@ done:
 	return result;
 }
 
+#ifdef __DREAMCAST__
+extern "C" void thd_pass(void);
+#endif
+
 // FUNCTION: LEGO1 0x100bf660
 // FUNCTION: BETA10 0x101476ee
 void MxThread::Sleep(MxS32 p_milliseconds)
 {
+#ifdef __DREAMCAST__
+	if (p_milliseconds > 0) {
+		SDL_Delay(p_milliseconds);
+	} else {
+		thd_pass();
+	}
+#else
 	SDL_Delay(p_milliseconds);
+#endif
 }
 
 // FUNCTION: BETA10 0x10147710

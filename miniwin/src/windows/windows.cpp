@@ -151,9 +151,21 @@ int SetRect(RECT* rc, int left, int top, int right, int bottom)
 	return 1;
 }
 
+#ifdef __DREAMCAST__
+extern "C" void thd_pass(void);
+#endif
+
 VOID WINAPI Sleep(DWORD dwMilliseconds)
 {
+#ifdef __DREAMCAST__
+	if (dwMilliseconds > 0) {
+		SDL_Delay(dwMilliseconds);
+	} else {
+		thd_pass();
+	}
+#else
 	SDL_Delay(dwMilliseconds);
+#endif
 }
 
 BOOL ClientToScreen(HWND hWnd, LPPOINT lpPoint)

@@ -194,11 +194,13 @@ BOOL MxDirect3D::D3DSetMode()
 	LPDIRECTDRAWSURFACE backBuf = BackBuffer();
 	assert(!m_pDirect3dDevice);
 
+#ifndef __DREAMCAST__
 	printf("MxDirect3D::D3DSetMode about to call CreateDevice with GUID:\n");
 	printf("GUID passed: %08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
 		m_currentDeviceInfo->m_guid.m_data1, m_currentDeviceInfo->m_guid.m_data2, m_currentDeviceInfo->m_guid.m_data3,
 		m_currentDeviceInfo->m_guid.m_data4[0], m_currentDeviceInfo->m_guid.m_data4[1], m_currentDeviceInfo->m_guid.m_data4[2], m_currentDeviceInfo->m_guid.m_data4[3],
 		m_currentDeviceInfo->m_guid.m_data4[4], m_currentDeviceInfo->m_guid.m_data4[5], m_currentDeviceInfo->m_guid.m_data4[6], m_currentDeviceInfo->m_guid.m_data4[7]);
+#endif
 
 	HRESULT result = m_pDirect3d->CreateDevice(m_currentDeviceInfo->m_guid, backBuf, &m_pDirect3dDevice);
 
@@ -299,10 +301,12 @@ BOOL MxDirect3D::SetDevice(MxDeviceEnumerate& p_deviceEnumerate, MxDriver* p_dri
 				if (&device == p_device) {
 					memcpy(&d->m_guid, device.m_guid, sizeof(d->m_guid));
 					
+#ifndef __DREAMCAST__
 					printf("SetDevice copied GUID: %08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
 						d->m_guid.m_data1, d->m_guid.m_data2, d->m_guid.m_data3,
 						d->m_guid.m_data4[0], d->m_guid.m_data4[1], d->m_guid.m_data4[2], d->m_guid.m_data4[3],
 						d->m_guid.m_data4[4], d->m_guid.m_data4[5], d->m_guid.m_data4[6], d->m_guid.m_data4[7]);
+#endif
 
 					if (device.m_HWDesc.dcmColorModel != D3DCOLOR_NONE) {
 						d->m_flags |= MxAssignedDevice::c_hardwareMode;

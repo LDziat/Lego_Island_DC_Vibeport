@@ -244,11 +244,15 @@ MxResult MxVideoManager::Create(MxVideoParam& p_videoParam, MxU32 p_frequencyMS,
 	HWND hWnd = NULL;
 
 	m_created = TRUE;
+#ifndef __DREAMCAST__
 	printf("MxVideoManager::Create started...\n");
+#endif
 
 	if (MxPresentationManager::Create() != SUCCESS) {
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "MxPresentationManager::Create failed");
+#ifndef __DREAMCAST__
 		printf("MxPresentationManager::Create failed\n");
+#endif
 		goto done;
 	}
 
@@ -263,17 +267,25 @@ MxResult MxVideoManager::Create(MxVideoParam& p_videoParam, MxU32 p_frequencyMS,
 		goto done;
 	}
 
+#ifndef __DREAMCAST__
 	printf("Calling DirectDrawCreate...\n");
+#endif
 	if (DirectDrawCreate(NULL, &m_pDirectDraw, NULL) != DD_OK) {
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "::DirectDrawCreate failed");
+#ifndef __DREAMCAST__
 		printf("::DirectDrawCreate failed\n");
+#endif
 		goto done;
 	}
 
+#ifndef __DREAMCAST__
 	printf("Calling SetCooperativeLevel in MxVideoManager::Create...\n");
+#endif
 	if (m_pDirectDraw->SetCooperativeLevel(MxOmni::GetInstance()->GetWindowHandle(), DDSCL_NORMAL) != DD_OK) {
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "IDirectDraw::SetCooperativeLevel failed");
+#ifndef __DREAMCAST__
 		printf("IDirectDraw::SetCooperativeLevel failed\n");
+#endif
 		goto done;
 	}
 
@@ -297,7 +309,9 @@ MxResult MxVideoManager::Create(MxVideoParam& p_videoParam, MxU32 p_frequencyMS,
 		}
 	}
 
+#ifndef __DREAMCAST__
 	printf("Calling MxDisplaySurface::Create...\n");
+#endif
 	m_displaySurface = new MxDisplaySurface();
 	if (m_displaySurface && m_displaySurface->Create(m_videoParam) == SUCCESS) {
 		m_displaySurface->SetPalette(m_videoParam.GetPalette());

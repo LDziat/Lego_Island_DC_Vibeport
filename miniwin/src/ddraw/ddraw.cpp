@@ -76,7 +76,9 @@ HRESULT DirectDrawImpl::CreateSurface(
 			if ((lpDDSurfaceDesc->dwFlags & DDSD_ZBUFFERBITDEPTH) != DDSD_ZBUFFERBITDEPTH) {
 				return DDERR_INVALIDPARAMS;
 			}
+#ifndef __DREAMCAST__
 			SDL_Log("Todo: Set %" PRIu32 "bit Z-Buffer", lpDDSurfaceDesc->dwZBufferBitDepth);
+#endif
 			*lplpDDSurface = static_cast<IDirectDrawSurface*>(new DummySurfaceImpl);
 			return DD_OK;
 		}
@@ -128,7 +130,9 @@ HRESULT DirectDrawImpl::CreateSurface(
 		return DDERR_INVALIDPARAMS;
 	}
 
+#ifndef __DREAMCAST__
 	SDL_Log("CreateSurface: w=%d h=%d format=%d dwFlags=0x%x RGBBitCount=%d", width, height, format, lpDDSurfaceDesc->dwFlags, lpDDSurfaceDesc->ddpfPixelFormat.dwRGBBitCount);
+#endif
 
 	*lplpDDSurface = static_cast<IDirectDrawSurface*>(new DirectDrawSurfaceImpl(width, height, format));
 	return DD_OK;

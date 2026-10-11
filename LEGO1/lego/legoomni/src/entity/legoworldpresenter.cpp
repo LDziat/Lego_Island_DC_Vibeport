@@ -275,15 +275,27 @@ MxResult LegoWorldPresenter::LoadWorld(char* p_worldName, LegoWorld* p_world)
 
 	for (j = 0; j < worlds[i].m_numModels; j++) {
 #ifdef __DREAMCAST__
-		MW_DrawLoadingBar((float)j / worlds[i].m_numModels);
+		if ((j & 7) == 0 || j == worlds[i].m_numModels - 1) {
+			MW_DrawLoadingBar((float)j / worlds[i].m_numModels);
+		}
 #endif
 		if (!SDL_strncasecmp(worlds[i].m_models[j].m_modelName, "isle", 4)) {
 			switch (g_legoWorldPresenterQuality) {
-			case 0:
-				if (SDL_strcasecmp(worlds[i].m_models[j].m_modelName, "isle_lo")) {
+			case 0: {
+				// Prefer isle_lo if present; otherwise fall back to isle (isle_lo does not exist in standard game data)
+				bool hasIsleLo = false;
+				for (MxS32 k = 0; k < worlds[i].m_numModels; k++) {
+					if (!SDL_strcasecmp(worlds[i].m_models[k].m_modelName, "isle_lo")) {
+						hasIsleLo = true;
+						break;
+					}
+				}
+				const char* targetName = hasIsleLo ? "isle_lo" : "isle";
+				if (SDL_strcasecmp(worlds[i].m_models[j].m_modelName, targetName)) {
 					continue;
 				}
 				break;
+			}
 			case 1:
 				if (SDL_strcasecmp(worlds[i].m_models[j].m_modelName, "isle")) {
 					continue;

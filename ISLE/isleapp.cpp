@@ -118,6 +118,7 @@
 
 #ifdef __DREAMCAST__
 #include <malloc.h>
+extern "C" void thd_pass(void);
 extern "C" void glKosInitConfig(void* config);
 extern "C" void glKosInitEx(void* config);
 struct GLdcConfig {
@@ -1141,10 +1142,8 @@ MxResult IsleApp::SetupWindow()
 #endif
 
 	#ifdef __DREAMCAST__
-	printf("Calling SDL_SetVideoMode with %d x %d\n", g_targetWidth, g_targetHeight);
 	SDL_ClearError();
 	Uint32 my_flags = SDL_FULLSCREEN | SDL_HWSURFACE;
-	printf("my_flags is %08x. SDL_OPENGL is %08x\n", my_flags, SDL_OPENGL);
 	window = SDL_SetVideoMode(g_targetWidth, g_targetHeight, 16, my_flags);
 	#ifdef __DREAMCAST__
 	GLdcConfig glconfig;
@@ -1157,9 +1156,10 @@ MxResult IsleApp::SetupWindow()
 	glconfig.initial_immediate_capacity = 512;
 	glconfig.texture_twiddle = 0;
 	glKosInitEx(&glconfig);
-	PrintHeapStats("After GLdc init");
 #endif
+#ifndef __DREAMCAST__
 	printf("SDL_SetVideoMode returned %p. SDL Error: %s\n", window, SDL_GetError());
+#endif
 #else
 	window = SDL_CreateWindowWithProperties(props);
 #endif
@@ -1228,23 +1228,28 @@ MxResult IsleApp::SetupWindow()
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to open SDL_IOStream for icon: %s", SDL_GetError());
 	}
 
+#ifndef __DREAMCAST__
 	printf("Calling SetupLegoOmni...\n");
+#endif
 	if (!SetupLegoOmni()) {
-		printf("SetupLegoOmni FAILED!\n");
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SetupLegoOmni FAILED!");
 		return FAILURE;
 	}
+#ifndef __DREAMCAST__
 	printf("SetupLegoOmni SUCCEEDED!\n");
+#endif
 
 	GameState()->SetSavePath(m_savePath);
 
+#ifndef __DREAMCAST__
 	printf("Calling VerifyFilesystem...\n");
+#endif
 	if (VerifyFilesystem() != SUCCESS) {
-		printf("VerifyFilesystem FAILED!\n");
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VerifyFilesystem FAILED!");
 		return FAILURE;
 	}
+#ifndef __DREAMCAST__
 	printf("VerifyFilesystem SUCCEEDED!\n");
-#ifdef __DREAMCAST__
-	PrintHeapStats("Startup after VerifyFilesystem");
 #endif
 
 	Lego()->LoadSiLoader();
@@ -1522,7 +1527,11 @@ inline bool IsleApp::Tick()
 	static MxS32 g_startupDelay = 1;
 
 	if (!m_windowActive) {
+#ifdef __DREAMCAST__
+		thd_pass();
+#else
 		SDL_Delay(1);
+#endif
 		return true;
 	}
 
@@ -1550,7 +1559,11 @@ inline bool IsleApp::Tick()
 	}
 
 	if (m_frameDelta + g_lastFrameTime >= currentTime) {
+#ifdef __DREAMCAST__
+		thd_pass();
+#else
 		SDL_Delay(1);
+#endif
 		return true;
 	}
 

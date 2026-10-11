@@ -177,10 +177,12 @@ void Direct3DDeviceInfo::Initialize(
 	if (p_guid) {
 		m_guid = new GUID;
 		memcpy(m_guid, p_guid, sizeof(*m_guid));
+#ifndef __DREAMCAST__
 		printf("Initialize allocated and copied GUID: %08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x at %p\n",
 			m_guid->m_data1, m_guid->m_data2, m_guid->m_data3,
 			m_guid->m_data4[0], m_guid->m_data4[1], m_guid->m_data4[2], m_guid->m_data4[3],
 			m_guid->m_data4[4], m_guid->m_data4[5], m_guid->m_data4[6], m_guid->m_data4[7], m_guid);
+#endif
 	}
 
 	if (p_deviceDesc) {
@@ -362,10 +364,12 @@ HRESULT MxDeviceEnumerate::EnumDevicesCallback(
 )
 {
 	if (p_guid) {
+#ifndef __DREAMCAST__
 		printf("EnumDevicesCallback received GUID: %08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
 			p_guid->m_data1, p_guid->m_data2, p_guid->m_data3,
 			p_guid->m_data4[0], p_guid->m_data4[1], p_guid->m_data4[2], p_guid->m_data4[3],
 			p_guid->m_data4[4], p_guid->m_data4[5], p_guid->m_data4[6], p_guid->m_data4[7]);
+#endif
 	}
 
 	Direct3DDeviceInfo device(p_guid, p_deviceDesc, p_deviceName, p_HWDesc, p_HELDesc);

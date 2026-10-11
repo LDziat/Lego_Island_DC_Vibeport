@@ -10,25 +10,10 @@
 
 #ifdef __DREAMCAST__
 #include <stdio.h>
-#define MINIWIN_NOT_IMPLEMENTED()                                                                                      \
-	do {                                                                                                               \
-		static bool visited = false;                                                                                   \
-		if (!visited) {                                                                                                \
-			fprintf(stderr, "%s: Not implemented\n", MINIWIN_PRETTY_FUNCTION);                                         \
-			visited = true;                                                                                            \
-		}                                                                                                              \
-	} while (0)
+#define MINIWIN_NOT_IMPLEMENTED() do {} while (0)
+#define MINIWIN_ERROR(MSG) do {} while (0)
 
-#define MINIWIN_ERROR(MSG)                                                                                             \
-	do {                                                                                                               \
-		fprintf(stderr, "%s: %s\n", __func__, MSG);                                                                    \
-	} while (0)
-
-#define MINIWIN_TRACE(...)                                                                                             \
-	do {                                                                                                               \
-		printf(__VA_ARGS__);                                                                                           \
-		printf("\n");                                                                                                  \
-	} while (0)
+#define MINIWIN_TRACE(...) do {} while (0)
 #else
 #define LOG_CATEGORY_MINIWIN (SDL_LOG_CATEGORY_CUSTOM)
 

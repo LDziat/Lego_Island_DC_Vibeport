@@ -93,7 +93,9 @@ MxResult LegoVideoManager::CreateDirect3D()
 // FUNCTION: BETA10 0x100d5cf4
 MxResult LegoVideoManager::Create(MxVideoParam& p_videoParam, MxU32 p_frequencyMS, MxBool p_createThread)
 {
+#ifndef __DREAMCAST__
 	printf("LegoVideoManager::Create started...\n");
+#endif
 	MxResult result = FAILURE;
 	MxBool paletteCreated = FALSE;
 	MxS32 deviceNum = -1;
@@ -328,7 +330,7 @@ void LegoVideoManager::ToggleFPS(MxBool p_visible)
 // STUB: BETA10 0x100d69cc
 MxResult LegoVideoManager::Tickle()
 {
-#ifndef BETA10
+#if !defined(BETA10) && !defined(__DREAMCAST__)
 	if (m_unk0x554 && !m_videoParam.Flags().GetFlipSurfaces() &&
 		TransitionManager()->GetTransitionType() == MxTransitionManager::e_idle) {
 		Sleep(30);

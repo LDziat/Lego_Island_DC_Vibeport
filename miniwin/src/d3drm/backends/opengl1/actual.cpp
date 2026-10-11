@@ -191,6 +191,7 @@ void GL11_DestroyMesh(GLMeshCacheEntry& cache)
 static GLenum s_currentShadeModel = 0;
 static GLuint s_currentBoundTexId = 0xFFFFFFFF;
 static bool s_currentTex2DEnabled = false;
+static float s_currentShininess = -1.0f;
 
 void GL11_BeginFrame(const Matrix4x4* projection)
 {
@@ -204,6 +205,7 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	s_currentShadeModel = 0;
 	s_currentBoundTexId = 0xFFFFFFFF;
 	s_currentTex2DEnabled = false;
+	s_currentShininess = -1.0f;
 	glDisable(GL_TEXTURE_2D);
 	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -289,22 +291,24 @@ void GL11_SubmitDraw(
 {
 	glLoadMatrixf(&modelViewMatrix[0][0]);
 
-	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 #ifdef __DREAMCAST__
 	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.unused);
 #else
 	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.a);
 #endif
 
-	if (appearance.shininess != 0.0f) {
-		GLfloat whiteSpec[] = {1.f, 1.f, 1.f, 1.f};
-		glMaterialfv(GL_FRONT, GL_SPECULAR, whiteSpec);
-		glMaterialf(GL_FRONT, GL_SHININESS, appearance.shininess);
-	}
-	else {
-		GLfloat noSpec[] = {0.0f, 0.0f, 0.0f, 0.0f};
-		glMaterialfv(GL_FRONT, GL_SPECULAR, noSpec);
-		glMaterialf(GL_FRONT, GL_SHININESS, 0.0f);
+	if (s_currentShininess != appearance.shininess) {
+		if (appearance.shininess != 0.0f) {
+			GLfloat whiteSpec[] = {1.f, 1.f, 1.f, 1.f};
+			glMaterialfv(GL_FRONT, GL_SPECULAR, whiteSpec);
+			glMaterialf(GL_FRONT, GL_SHININESS, appearance.shininess);
+		}
+		else {
+			GLfloat noSpec[] = {0.0f, 0.0f, 0.0f, 0.0f};
+			glMaterialfv(GL_FRONT, GL_SPECULAR, noSpec);
+			glMaterialf(GL_FRONT, GL_SHININESS, 0.0f);
+		}
+		s_currentShininess = appearance.shininess;
 	}
 
 	GLenum neededShade = mesh.flat ? GL_FLAT : GL_SMOOTH;

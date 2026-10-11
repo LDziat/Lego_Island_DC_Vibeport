@@ -193,11 +193,16 @@ bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMat
 		{box.max.x, box.max.y, box.max.z},
 	};
 
+	bool straddlesNear = false;
 	for (D3DVECTOR& corner : boxCorners) {
 		corner = TransformPoint(corner, worldViewMatrix);
+		if (corner.z <= -frustumPlanes[4].d) {
+			straddlesNear = true;
+		}
 	}
 
-	for (int i = 0; i < 6; ++i) {
+	// 1. Test Near (plane 4) and Far (plane 5)
+	for (int i = 4; i < 6; ++i) {
 		const Plane& plane = frustumPlanes[i];
 		int out = 0;
 		for (int j = 0; j < 8; ++j) {
@@ -211,6 +216,27 @@ bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMat
 			return false;
 		}
 	}
+
+	// 2. Test side planes (0..3) ONLY if the box does not straddle behind the near plane.
+	// Side plane equations radiate from (0,0,0) and invert for negative view-space Z,
+	// which would falsely cull large meshes (like island terrain) surrounding the camera.
+	if (!straddlesNear) {
+		for (int i = 0; i < 4; ++i) {
+			const Plane& plane = frustumPlanes[i];
+			int out = 0;
+			for (int j = 0; j < 8; ++j) {
+				const D3DVECTOR& corner = boxCorners[j];
+				float dist = plane.normal.x * corner.x + plane.normal.y * corner.y + plane.normal.z * corner.z + plane.d;
+				if (dist < 0.0f) {
+					++out;
+				}
+			}
+			if (out == 8) {
+				return false;
+			}
+		}
+	}
+
 	return true;
 }
 
@@ -264,6 +290,31 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 		if (mesh) {
 			D3DRMMATRIX4D modelViewMatrix;
 			MultiplyMatrix(modelViewMatrix, worldMatrix, m_viewMatrix);
+
+			// Distance culling for small props / actors / NPCs
+			D3DRMBOX box;
+			mesh->GetBox(&box);
+			bool isValidBox = (box.min.x <= box.max.x && box.min.y <= box.max.y && box.min.z <= box.max.z);
+			if (isValidBox) {
+				float extentX = box.max.x - box.min.x;
+				float extentY = box.max.y - box.min.y;
+				float extentZ = box.max.z - box.min.z;
+				float sizeSq = extentX * extentX + extentY * extentY + extentZ * extentZ;
+				// If bounding diameter < 30 units (actors, vehicles, props)
+				if (sizeSq < (30.0f * 30.0f)) {
+					float vx = modelViewMatrix[3][0];
+					float vy = modelViewMatrix[3][1];
+					float vz = modelViewMatrix[3][2];
+					float distSq = vx * vx + vy * vy + vz * vz;
+					// Cull objects beyond 100 units from the camera
+					if (distSq > (100.0f * 100.0f)) {
+						mesh->Release();
+						visual->Release();
+						continue;
+					}
+				}
+			}
+
 			if (IsMeshInFrustum(mesh, modelViewMatrix, m_frustumPlanes)) {
 				DWORD groupCount = mesh->GetGroupCount();
 				for (DWORD gi = 0; gi < groupCount; ++gi) {

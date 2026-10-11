@@ -188,6 +188,10 @@ void GL11_DestroyMesh(GLMeshCacheEntry& cache)
 	cache.meshGroup = nullptr;
 }
 
+static GLenum s_currentShadeModel = 0;
+static GLuint s_currentBoundTexId = 0xFFFFFFFF;
+static bool s_currentTex2DEnabled = false;
+
 void GL11_BeginFrame(const Matrix4x4* projection)
 {
 	glDisable(GL_BLEND);
@@ -196,6 +200,14 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	glEnable(GL_LIGHTING);
 	glEnable(GL_COLOR_MATERIAL);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+	s_currentShadeModel = 0;
+	s_currentBoundTexId = 0xFFFFFFFF;
+	s_currentTex2DEnabled = false;
+	glDisable(GL_TEXTURE_2D);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_NORMAL_ARRAY);
 
 	// Disable all lights and reset global ambient
 	for (int i = 0; i < 8; ++i) {
@@ -276,7 +288,6 @@ void GL11_SubmitDraw(
 )
 {
 	glLoadMatrixf(&modelViewMatrix[0][0]);
-	glEnable(GL_NORMALIZE);
 
 	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 #ifdef __DREAMCAST__
@@ -296,26 +307,31 @@ void GL11_SubmitDraw(
 		glMaterialf(GL_FRONT, GL_SHININESS, 0.0f);
 	}
 
-	if (mesh.flat) {
-		glShadeModel(GL_FLAT);
-	}
-	else {
-		glShadeModel(GL_SMOOTH);
-	}
-
-	// Bind texture if present
-	if (appearance.textureId != NO_TEXTURE_ID && texId != 0xFFFFFFFF) {
-		glEnable(GL_TEXTURE_2D);
-		glBindTexture(GL_TEXTURE_2D, texId);
-		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-	}
-	else {
-		glDisable(GL_TEXTURE_2D);
-		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	GLenum neededShade = mesh.flat ? GL_FLAT : GL_SMOOTH;
+	if (s_currentShadeModel != neededShade) {
+		glShadeModel(neededShade);
+		s_currentShadeModel = neededShade;
 	}
 
-	glEnableClientState(GL_VERTEX_ARRAY);
-	glEnableClientState(GL_NORMAL_ARRAY);
+	bool needTex = (appearance.textureId != NO_TEXTURE_ID && texId != 0xFFFFFFFF && texId != 0);
+	if (needTex) {
+		if (!s_currentTex2DEnabled) {
+			glEnable(GL_TEXTURE_2D);
+			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+			s_currentTex2DEnabled = true;
+		}
+		if (s_currentBoundTexId != texId) {
+			glBindTexture(GL_TEXTURE_2D, texId);
+			s_currentBoundTexId = texId;
+		}
+	}
+	else {
+		if (s_currentTex2DEnabled) {
+			glDisable(GL_TEXTURE_2D);
+			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+			s_currentTex2DEnabled = false;
+		}
+	}
 
 	if (g_useVBOs) {
 		mwglBindBuffer(GL_ARRAY_BUFFER_ARB, mesh.vboPositions);
@@ -324,7 +340,7 @@ void GL11_SubmitDraw(
 		mwglBindBuffer(GL_ARRAY_BUFFER_ARB, mesh.vboNormals);
 		glNormalPointer(GL_FLOAT, 0, nullptr);
 
-		if (appearance.textureId != NO_TEXTURE_ID) {
+		if (needTex) {
 			mwglBindBuffer(GL_ARRAY_BUFFER_ARB, mesh.vboTexcoords);
 			glTexCoordPointer(2, GL_FLOAT, 0, nullptr);
 		}
@@ -340,7 +356,7 @@ void GL11_SubmitDraw(
 			const char* basePtr = reinterpret_cast<const char*>(mesh.vertexData);
 			glVertexPointer(3, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, position));
 			glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
-			if (appearance.textureId != NO_TEXTURE_ID && texId != 0xFFFFFFFF && texId != 0) {
+			if (needTex) {
 				glTexCoordPointer(2, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, tu));
 			}
 
@@ -429,6 +445,9 @@ void GL11_Draw2DImage(
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	glEnable(GL_CULL_FACE);
+	s_currentBoundTexId = 0xFFFFFFFF;
+	s_currentTex2DEnabled = false;
+	s_currentShadeModel = 0;
 	// Restore state
 	glMatrixMode(GL_MODELVIEW);
 }

@@ -165,7 +165,8 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 					int srcX = (x * src->w) / newW;
 					Uint8 index = srcRow[srcX];
 					SDL_Color c = pal->colors[index];
-					Uint32 a = (hasColorkey && index == colorkey) ? 0x00 : 0xFF;
+					bool isTransparent = hasColorkey ? (index == colorkey) : (!isUI && index == 0);
+					Uint32 a = isTransparent ? 0x00 : 0xFF;
 					fullBuffer[y * newW + x] = c.r | (c.g << 8) | (c.b << 16) | (a << 24);
 				}
 			}
@@ -175,7 +176,8 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				for (int x = 0; x < src->w; ++x) {
 					Uint8 index = srcRow[x];
 					SDL_Color c = pal->colors[index];
-					Uint32 a = (hasColorkey && index == colorkey) ? 0x00 : 0xFF;
+					bool isTransparent = hasColorkey ? (index == colorkey) : (!isUI && index == 0);
+					Uint32 a = isTransparent ? 0x00 : 0xFF;
 					fullBuffer[y * newW + x] = c.r | (c.g << 8) | (c.b << 16) | (a << 24);
 				}
 			}

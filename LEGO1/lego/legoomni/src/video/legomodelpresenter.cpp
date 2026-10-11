@@ -64,16 +64,9 @@ MxResult LegoModelPresenter::CreateROI(MxDSChunk* p_chunk)
 	LegoTextureInfo* textureInfo = NULL;
 	LegoS32 hardwareMode = VideoManager()->GetDirect3D()->AssignedDevice()->GetHardwareMode();
 
-	setbuf(stdout, NULL);
-	printf("LegoModelPresenter::ReadModel - Chunk length: %d\n", p_chunk->GetLength());
-	
 	if (p_chunk->GetLength() < sizeof(LegoU32)) {
 		return FAILURE;
 	}
-	printf("Chunk Header: flags=%04x, objId=%lu, time=%ld\n", p_chunk->GetChunkFlags(), (unsigned long)p_chunk->GetObjectId(), (long)p_chunk->GetTime());
-#ifdef _arch_dreamcast
-	thd_sleep(100); // Let UART drain
-#endif
 
 	if (m_roi) {
 		delete m_roi;

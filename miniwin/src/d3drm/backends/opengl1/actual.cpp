@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stddef.h>
 // This file cannot include any minwin headers.
 
 #include "actual.h"
@@ -149,35 +150,15 @@ void GL11_DebugFlashTexture(GLuint texId, int width, int height)
 
 void GL11_UploadMesh(GLMeshCacheEntry& cache, bool hasTexture)
 {
-	if (g_useVBOs) {
+	if (g_useVBOs && cache.vertexData && cache.vertexCount > 0 && !cache.indices.empty()) {
 		mwglGenBuffers(1, &cache.vboPositions);
 		mwglBindBuffer(GL_ARRAY_BUFFER_ARB, cache.vboPositions);
 		mwglBufferData(
 			GL_ARRAY_BUFFER_ARB,
-			cache.positions.size() * sizeof(GL11_BridgeVector),
-			cache.positions.data(),
+			cache.vertexCount * sizeof(GL11_BridgeSceneVertex),
+			cache.vertexData,
 			GL_STATIC_DRAW_ARB
 		);
-
-		mwglGenBuffers(1, &cache.vboNormals);
-		mwglBindBuffer(GL_ARRAY_BUFFER_ARB, cache.vboNormals);
-		mwglBufferData(
-			GL_ARRAY_BUFFER_ARB,
-			cache.normals.size() * sizeof(GL11_BridgeVector),
-			cache.normals.data(),
-			GL_STATIC_DRAW_ARB
-		);
-
-		if (hasTexture) {
-			mwglGenBuffers(1, &cache.vboTexcoords);
-			mwglBindBuffer(GL_ARRAY_BUFFER_ARB, cache.vboTexcoords);
-			mwglBufferData(
-				GL_ARRAY_BUFFER_ARB,
-				cache.texcoords.size() * sizeof(GL11_BridgeTexCoord),
-				cache.texcoords.data(),
-				GL_STATIC_DRAW_ARB
-			);
-		}
 
 		mwglGenBuffers(1, &cache.ibo);
 		mwglBindBuffer(GL_ELEMENT_ARRAY_BUFFER_ARB, cache.ibo);
@@ -198,6 +179,13 @@ void GL11_DestroyMesh(GLMeshCacheEntry& cache)
 		mwglDeleteBuffers(1, &cache.vboTexcoords);
 		mwglDeleteBuffers(1, &cache.ibo);
 	}
+	cache.flatVertices.clear();
+	cache.flatVertices.shrink_to_fit();
+	cache.indices.clear();
+	cache.indices.shrink_to_fit();
+	cache.vertexData = nullptr;
+	cache.vertexCount = 0;
+	cache.meshGroup = nullptr;
 }
 
 void GL11_BeginFrame(const Matrix4x4* projection)
@@ -207,6 +195,7 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	glDepthMask(GL_TRUE);
 	glEnable(GL_LIGHTING);
 	glEnable(GL_COLOR_MATERIAL);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
 	// Disable all lights and reset global ambient
 	for (int i = 0; i < 8; ++i) {
@@ -347,13 +336,16 @@ void GL11_SubmitDraw(
 		mwglBindBuffer(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
 	}
 	else {
-		glVertexPointer(3, GL_FLOAT, 0, mesh.positions.data());
-		glNormalPointer(GL_FLOAT, 0, mesh.normals.data());
-		if (appearance.textureId != NO_TEXTURE_ID) {
-			glTexCoordPointer(2, GL_FLOAT, 0, mesh.texcoords.data());
-		}
+		if (mesh.vertexData && !mesh.indices.empty()) {
+			const char* basePtr = reinterpret_cast<const char*>(mesh.vertexData);
+			glVertexPointer(3, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, position));
+			glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
+			if (appearance.textureId != NO_TEXTURE_ID && texId != 0xFFFFFFFF && texId != 0) {
+				glTexCoordPointer(2, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, tu));
+			}
 
-		glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_SHORT, mesh.indices.data());
+			glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_SHORT, mesh.indices.data());
+		}
 	}
 }
 
@@ -435,10 +427,10 @@ void GL11_Draw2DImage(
 	glVertex3f(x1, y2, z);
 	glEnd();
 
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	glEnable(GL_CULL_FACE);
 	// Restore state
 	glMatrixMode(GL_MODELVIEW);
-	glMatrixMode(GL_PROJECTION);
 }
 
 void GL11_Download(SDL_Surface* target)

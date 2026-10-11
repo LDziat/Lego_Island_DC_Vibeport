@@ -46,21 +46,22 @@ struct GLTextureCacheEntry {
 };
 
 struct GLMeshCacheEntry {
-	const MeshGroup* meshGroup;
-	int version;
-	bool flat;
+	const MeshGroup* meshGroup = nullptr;
+	int version = 0;
+	bool flat = false;
 
-	// non-VBO cache
-	std::vector<GL11_BridgeVector> positions;
-	std::vector<GL11_BridgeVector> normals;
-	std::vector<GL11_BridgeTexCoord> texcoords;
+	// non-VBO cache: for flat meshes, flatVertices stores deduplicated surface vertices;
+	// for non-flat meshes, flatVertices is empty and vertexData points directly to meshGroup->vertices!
+	std::vector<GL11_BridgeSceneVertex> flatVertices;
+	const GL11_BridgeSceneVertex* vertexData = nullptr;
+	size_t vertexCount = 0;
 	std::vector<uint16_t> indices;
 
 	// VBO cache
-	GLuint vboPositions;
-	GLuint vboNormals;
-	GLuint vboTexcoords;
-	GLuint ibo;
+	GLuint vboPositions = 0;
+	GLuint vboNormals = 0;
+	GLuint vboTexcoords = 0;
+	GLuint ibo = 0;
 };
 
 void GL11_InitState();

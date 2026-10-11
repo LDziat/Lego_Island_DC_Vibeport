@@ -117,6 +117,7 @@
 #endif
 
 #ifdef __DREAMCAST__
+#include <malloc.h>
 extern "C" void glKosInitConfig(void* config);
 extern "C" void glKosInitEx(void* config);
 struct GLdcConfig {
@@ -129,6 +130,13 @@ struct GLdcConfig {
 	unsigned int initial_immediate_capacity;
 	unsigned char texture_twiddle;
 };
+
+static void PrintHeapStats(const char* label)
+{
+	struct mallinfo mi = mallinfo();
+	printf("[RAM] %s: arena=%d, uordblks=%d, fordblks=%d\n",
+		label, mi.arena, mi.uordblks, mi.fordblks);
+}
 #endif
 DECOMP_SIZE_ASSERT(IsleApp, 0x8c)
 
@@ -1143,12 +1151,13 @@ MxResult IsleApp::SetupWindow()
 	glKosInitConfig(&glconfig);
 	glconfig.autosort_enabled = 0;
 	glconfig.fsaa_enabled = 0;
-	glconfig.initial_op_capacity = 1024 * 15;
-	glconfig.initial_tr_capacity = 1024 * 8;
-	glconfig.initial_pt_capacity = 1024 * 1;
-	glconfig.initial_immediate_capacity = 1024 * 1;
+	glconfig.initial_op_capacity = 1024 * 24;
+	glconfig.initial_tr_capacity = 1024 * 2;
+	glconfig.initial_pt_capacity = 512;
+	glconfig.initial_immediate_capacity = 512;
 	glconfig.texture_twiddle = 0;
 	glKosInitEx(&glconfig);
+	PrintHeapStats("After GLdc init");
 #endif
 	printf("SDL_SetVideoMode returned %p. SDL Error: %s\n", window, SDL_GetError());
 #else
@@ -1234,6 +1243,9 @@ MxResult IsleApp::SetupWindow()
 		return FAILURE;
 	}
 	printf("VerifyFilesystem SUCCEEDED!\n");
+#ifdef __DREAMCAST__
+	PrintHeapStats("Startup after VerifyFilesystem");
+#endif
 
 	Lego()->LoadSiLoader();
 

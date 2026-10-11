@@ -158,16 +158,15 @@ void Direct3DRMViewportImpl::CollectLightsFromFrame(
 
 void Direct3DRMViewportImpl::BuildViewFrustumPlanes()
 {
-
 	float aspect = (float) m_renderer->GetWidth() / (float) m_renderer->GetHeight();
-	float tanFovX = m_field;
-	float tanFovY = m_field / aspect;
+	float tanFovX = (m_front > 0.0f) ? (m_field / m_front) : 1.0f;
+	float tanFovY = tanFovX / aspect;
 
-	// View-space frustum planes
-	m_frustumPlanes[0] = {Normalize({tanFovX, 0.0f, 1.0f}), 0.0f};  // Left
-	m_frustumPlanes[1] = {Normalize({-tanFovX, 0.0f, 1.0f}), 0.0f}; // Right
-	m_frustumPlanes[2] = {Normalize({0.0f, -tanFovY, 1.0f}), 0.0f}; // Top
-	m_frustumPlanes[3] = {Normalize({0.0f, tanFovY, 1.0f}), 0.0f};  // Bottom
+	// View-space frustum planes (inward-pointing normals)
+	m_frustumPlanes[0] = {Normalize({1.0f, 0.0f, tanFovX}), 0.0f};  // Left:   x + tanFovX * z >= 0
+	m_frustumPlanes[1] = {Normalize({-1.0f, 0.0f, tanFovX}), 0.0f}; // Right: -x + tanFovX * z >= 0
+	m_frustumPlanes[2] = {Normalize({0.0f, -1.0f, tanFovY}), 0.0f}; // Top:   -y + tanFovY * z >= 0
+	m_frustumPlanes[3] = {Normalize({0.0f, 1.0f, tanFovY}), 0.0f};  // Bottom:  y + tanFovY * z >= 0
 
 	// Near and far planes
 	m_frustumPlanes[4] = {{0.0f, 0.0f, 1.0f}, -m_front}; // Near (Z >= m_front)
@@ -178,6 +177,10 @@ bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMat
 {
 	D3DRMBOX box;
 	mesh->GetBox(&box);
+
+	if (box.min.x > box.max.x || box.min.y > box.max.y || box.min.z > box.max.z) {
+		return true;
+	}
 
 	D3DVECTOR boxCorners[8] = {
 		{box.min.x, box.min.y, box.min.z},

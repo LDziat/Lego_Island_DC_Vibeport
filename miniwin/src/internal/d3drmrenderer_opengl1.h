@@ -54,6 +54,7 @@ private:
 	std::vector<SceneLight> m_lights;
 	SDL_GLContext m_context;
 	ViewportTransform m_viewportTransform;
+	size_t m_frameVerticesSubmitted = 0;
 };
 
 inline static void OpenGL1Renderer_EnumDevice(const IDirect3DMiniwin* d3d, LPD3DENUMDEVICESCALLBACK cb, void* ctx)

@@ -62,7 +62,11 @@ OpenGL1Renderer::OpenGL1Renderer(DWORD width, DWORD height, SDL_GLContext contex
 	m_height = height;
 	m_virtualWidth = width;
 	m_virtualHeight = height;
+#ifdef __DREAMCAST__
+	m_renderedImage = nullptr;
+#else
 	m_renderedImage = SDL_CreateSurface(m_width, m_height, SDL_PIXELFORMAT_RGBA32);
+#endif
 	GL11_LoadExtensions();
 	m_useVBOs = false;
 	m_useNPOT = SDL_GL_ExtensionSupported("GL_OES_texture_npot");
@@ -70,7 +74,9 @@ OpenGL1Renderer::OpenGL1Renderer(DWORD width, DWORD height, SDL_GLContext contex
 
 OpenGL1Renderer::~OpenGL1Renderer()
 {
-	SDL_DestroySurface(m_renderedImage);
+	if (m_renderedImage) {
+		SDL_DestroySurface(m_renderedImage);
+	}
 	SDL_GL_DestroyContext(m_context);
 }
 
@@ -149,7 +155,8 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 	SDL_Palette* pal = src->format->palette;
 	
 	if (src->format->BitsPerPixel == 8 && pal) {
-		Uint32 colorkey = (src->flags & SDL_SRCCOLORKEY) ? src->format->colorkey : 0xFFFFFFFF;
+		bool hasColorkey = (src->flags & SDL_SRCCOLORKEY) != 0;
+		Uint32 colorkey = hasColorkey ? src->format->colorkey : 0xFFFFFFFF;
 		if (scaleUI || scale3D) {
 			for (int y = 0; y < newH; ++y) {
 				int srcY = (y * src->h) / newH;
@@ -158,7 +165,7 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 					int srcX = (x * src->w) / newW;
 					Uint8 index = srcRow[srcX];
 					SDL_Color c = pal->colors[index];
-					Uint32 a = (index == colorkey) ? 0x00 : 0xFF;
+					Uint32 a = (hasColorkey && index == colorkey) ? 0x00 : 0xFF;
 					fullBuffer[y * newW + x] = c.r | (c.g << 8) | (c.b << 16) | (a << 24);
 				}
 			}
@@ -168,7 +175,7 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				for (int x = 0; x < src->w; ++x) {
 					Uint8 index = srcRow[x];
 					SDL_Color c = pal->colors[index];
-					Uint32 a = (index == colorkey) ? 0x00 : 0xFF;
+					Uint32 a = (hasColorkey && index == colorkey) ? 0x00 : 0xFF;
 					fullBuffer[y * newW + x] = c.r | (c.g << 8) | (c.b << 16) | (a << 24);
 				}
 			}
@@ -205,11 +212,38 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				}
 			}
 		}
+	} else if (src->format->BitsPerPixel == 32) {
+		bool hasColorkey = (src->flags & SDL_SRCCOLORKEY) != 0;
+		Uint32 colorkey = hasColorkey ? src->format->colorkey : 0;
+		if (scaleUI || scale3D) {
+			for (int y = 0; y < newH; ++y) {
+				int srcY = (y * src->h) / newH;
+				Uint32* srcRow = (Uint32*)((Uint8*)src->pixels + srcY * src->pitch);
+				for (int x = 0; x < newW; ++x) {
+					int srcX = (x * src->w) / newW;
+					Uint32 px = srcRow[srcX];
+					if (hasColorkey && px == colorkey) {
+						px = 0;
+					}
+					fullBuffer[y * newW + x] = px;
+				}
+			}
+		} else {
+			for (int y = 0; y < src->h; ++y) {
+				Uint32* srcRow = (Uint32*)((Uint8*)src->pixels + y * src->pitch);
+				for (int x = 0; x < src->w; ++x) {
+					Uint32 px = srcRow[x];
+					if (hasColorkey && px == colorkey) {
+						px = 0;
+					}
+					fullBuffer[y * newW + x] = px;
+				}
+			}
+		}
 	}
 	
 	// Create the texture in GLdc
 	Uint32 texId = GL11_UploadTextureData(fullBuffer.data(), newW, newH, isUI, scaleX, scaleY);
-	MW_DrawLoadingBug();
 	return texId;
 #else
 	SDL_Surface* working = src;
@@ -341,44 +375,35 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 
 GLMeshCacheEntry GLUploadMesh(const MeshGroup& meshGroup, bool useVBOs)
 {
-	GLMeshCacheEntry cache{&meshGroup, meshGroup.version};
-
+	GLMeshCacheEntry cache;
+	cache.meshGroup = &meshGroup;
+	cache.version = meshGroup.version;
 	cache.flat = meshGroup.quality == D3DRMRENDER_FLAT || meshGroup.quality == D3DRMRENDER_UNLITFLAT;
 
-	std::vector<D3DRMVERTEX> vertices;
 	if (cache.flat) {
+		std::vector<D3DRMVERTEX> flattenedVertices;
 		FlattenSurfaces(
 			meshGroup.vertices.data(),
 			meshGroup.vertices.size(),
 			meshGroup.indices.data(),
 			meshGroup.indices.size(),
 			meshGroup.texture != nullptr,
-			vertices,
+			flattenedVertices,
 			cache.indices
 		);
+		cache.flatVertices.resize(flattenedVertices.size());
+		memcpy(cache.flatVertices.data(), flattenedVertices.data(), flattenedVertices.size() * sizeof(GL11_BridgeSceneVertex));
+		cache.vertexData = cache.flatVertices.data();
+		cache.vertexCount = cache.flatVertices.size();
 	}
 	else {
-		vertices = meshGroup.vertices;
 		cache.indices.resize(meshGroup.indices.size());
 		std::transform(meshGroup.indices.begin(), meshGroup.indices.end(), cache.indices.begin(), [](DWORD index) {
 			return static_cast<uint16_t>(index);
 		});
+		cache.vertexData = reinterpret_cast<const GL11_BridgeSceneVertex*>(meshGroup.vertices.data());
+		cache.vertexCount = meshGroup.vertices.size();
 	}
-
-	if (meshGroup.texture) {
-		cache.texcoords.resize(vertices.size());
-		std::transform(vertices.begin(), vertices.end(), cache.texcoords.begin(), [](const D3DRMVERTEX& v) {
-			return GL11_BridgeTexCoord{v.texCoord.u, v.texCoord.v};
-		});
-	}
-	cache.positions.resize(vertices.size());
-	std::transform(vertices.begin(), vertices.end(), cache.positions.begin(), [](const D3DRMVERTEX& v) {
-		return GL11_BridgeVector{v.position.x, v.position.y, v.position.z};
-	});
-	cache.normals.resize(vertices.size());
-	std::transform(vertices.begin(), vertices.end(), cache.normals.begin(), [](const D3DRMVERTEX& v) {
-		return GL11_BridgeVector{v.normal.x, v.normal.y, v.normal.z};
-	});
 
 	GL11_UploadMesh(cache, meshGroup.texture != nullptr);
 
@@ -436,6 +461,9 @@ Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGr
 HRESULT OpenGL1Renderer::BeginFrame()
 {
 	SDL_GL_MakeCurrent(DDWindow, m_context);
+#ifdef __DREAMCAST__
+	m_frameVerticesSubmitted = 0;
+#endif
 	GL11_BeginFrame((Matrix4x4*) &m_projection[0][0]);
 
 	int lightIdx = 0;
@@ -466,6 +494,26 @@ void OpenGL1Renderer::SubmitDraw(
 {
 	auto& mesh = m_meshs[meshId];
 
+	if (mesh.flat) {
+		mesh.vertexData = mesh.flatVertices.data();
+		mesh.vertexCount = mesh.flatVertices.size();
+	}
+	else if (mesh.meshGroup) {
+		mesh.vertexData = reinterpret_cast<const GL11_BridgeSceneVertex*>(mesh.meshGroup->vertices.data());
+		mesh.vertexCount = mesh.meshGroup->vertices.size();
+	}
+
+	if (!mesh.vertexData || mesh.indices.empty()) {
+		return;
+	}
+
+#ifdef __DREAMCAST__
+	if (m_frameVerticesSubmitted + mesh.indices.size() > 24000) {
+		return;
+	}
+	m_frameVerticesSubmitted += mesh.indices.size();
+#endif
+
 	// Bind texture if present
 	if (appearance.textureId != NO_TEXTURE_ID) {
 		auto& tex = m_textures[appearance.textureId];
@@ -487,8 +535,12 @@ void OpenGL1Renderer::Resize(int width, int height, const ViewportTransform& vie
 	m_width = width;
 	m_height = height;
 	m_viewportTransform = viewportTransform;
-	SDL_DestroySurface(m_renderedImage);
+#ifndef __DREAMCAST__
+	if (m_renderedImage) {
+		SDL_DestroySurface(m_renderedImage);
+	}
 	m_renderedImage = SDL_CreateSurface(m_width, m_height, SDL_PIXELFORMAT_RGBA32);
+#endif
 	GL11_Resize(width, height);
 }
 

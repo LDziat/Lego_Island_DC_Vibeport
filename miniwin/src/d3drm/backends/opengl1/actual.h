@@ -49,6 +49,7 @@ struct GLMeshCacheEntry {
 	const MeshGroup* meshGroup = nullptr;
 	int version = 0;
 	bool flat = false;
+	bool isStrip = false;
 
 	// non-VBO cache: for flat meshes, flatVertices stores deduplicated surface vertices;
 	// for non-flat meshes, flatVertices is empty and vertexData points directly to meshGroup->vertices!

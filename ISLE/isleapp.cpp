@@ -1278,6 +1278,11 @@ MxResult IsleApp::SetupWindow()
 	LegoWorldPresenter::configureLegoWorldPresenter(m_islandQuality);
 	LegoBuildingManager::configureLegoBuildingManager(m_islandQuality);
 	LegoROI::configureLegoROI(iVar10);
+#ifdef __DREAMCAST__
+	if (g_debugMaxExtras >= 0) {
+		m_maxAllowedExtras = g_debugMaxExtras;
+	}
+#endif
 	LegoAnimationManager::configureLegoAnimationManager(m_maxAllowedExtras);
 	MxTransitionManager::configureMxTransitionManager(m_transitionType);
 	RealtimeView::SetUserMaxLOD(m_maxLod);

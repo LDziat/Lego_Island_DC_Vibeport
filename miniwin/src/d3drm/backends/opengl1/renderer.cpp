@@ -6,11 +6,13 @@ extern "C" void MW_DrawLoadingBug();
 #include "mathutils.h"
 #include "meshutils.h"
 #include "dcprof.h"
+#include "compat.h"
 
 #include <SDL/SDL.h>
 #include <algorithm>
 #include <cstring>
 #include <vector>
+#include <unordered_map>
 
 static_assert(sizeof(Matrix4x4) == sizeof(D3DRMMATRIX4D), "Matrix4x4 is wrong size");
 static_assert(sizeof(GL11_BridgeVector) == sizeof(D3DVECTOR), "GL11_BridgeVector is wrong size");
@@ -459,6 +461,92 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 	return newId;
 }
 
+#ifdef __DREAMCAST__
+static bool StripifyTriangles(
+	const uint16_t* inIndices,
+	size_t numIndices,
+	std::vector<uint16_t>& outStrip
+)
+{
+	size_t numTris = numIndices / 3;
+	if (numTris < 2) return false;
+
+	struct Tri {
+		uint16_t v[3];
+	};
+	const Tri* tris = reinterpret_cast<const Tri*>(inIndices);
+
+	// Edge hash table: maps directed edge (u, v) -> (tri_idx, third_vertex)
+	std::unordered_map<uint32_t, std::pair<size_t, uint16_t>> edgeMap;
+	edgeMap.reserve(numTris * 3);
+	for (size_t i = 0; i < numTris; ++i) {
+		uint16_t a = tris[i].v[0], b = tris[i].v[1], c = tris[i].v[2];
+		edgeMap[(static_cast<uint32_t>(a) << 16) | b] = {i, c};
+		edgeMap[(static_cast<uint32_t>(b) << 16) | c] = {i, a};
+		edgeMap[(static_cast<uint32_t>(c) << 16) | a] = {i, b};
+	}
+
+	std::vector<bool> visited(numTris, false);
+	outStrip.clear();
+	outStrip.reserve(numIndices);
+
+	auto connectTri = [&](uint16_t u0, uint16_t u1, uint16_t u2) {
+		if (outStrip.empty()) {
+			outStrip.push_back(u0);
+			outStrip.push_back(u1);
+			outStrip.push_back(u2);
+			return;
+		}
+		uint16_t last = outStrip.back();
+		size_t S = outStrip.size();
+		if (S % 2 != 0) {
+			outStrip.push_back(last);
+			outStrip.push_back(last);
+			outStrip.push_back(u0);
+		} else {
+			outStrip.push_back(last);
+			outStrip.push_back(u0);
+		}
+		outStrip.push_back(u0);
+		outStrip.push_back(u1);
+		outStrip.push_back(u2);
+	};
+
+	for (size_t startIdx = 0; startIdx < numTris; ++startIdx) {
+		if (visited[startIdx]) continue;
+		visited[startIdx] = true;
+		connectTri(tris[startIdx].v[0], tris[startIdx].v[1], tris[startIdx].v[2]);
+
+		while (true) {
+			size_t L = outStrip.size();
+			uint16_t e0, e1;
+			if ((L - 2) % 2 == 0) {
+				e0 = outStrip[L - 2];
+				e1 = outStrip[L - 1];
+			} else {
+				e0 = outStrip[L - 1];
+				e1 = outStrip[L - 2];
+			}
+
+			uint32_t key = (static_cast<uint32_t>(e0) << 16) | e1;
+			auto it = edgeMap.find(key);
+			if (it != edgeMap.end() && !visited[it->second.first]) {
+				visited[it->second.first] = true;
+				outStrip.push_back(it->second.second);
+			} else {
+				break;
+			}
+		}
+	}
+
+	// Safety fallback: only accept if strip saves at least 15% indices
+	if (outStrip.size() > numIndices * 85 / 100) {
+		return false;
+	}
+	return true;
+}
+#endif
+
 GLMeshCacheEntry GLUploadMesh(const MeshGroup& meshGroup, bool useVBOs)
 {
 	DC_ZONE(Z_MESHUPLOAD);
@@ -489,6 +577,15 @@ GLMeshCacheEntry GLUploadMesh(const MeshGroup& meshGroup, bool useVBOs)
 		std::transform(meshGroup.indices.begin(), meshGroup.indices.end(), cache.indices.begin(), [](DWORD index) {
 			return static_cast<uint16_t>(index);
 		});
+#ifdef __DREAMCAST__
+		if (g_debugStrips) {
+			std::vector<uint16_t> strip;
+			if (StripifyTriangles(cache.indices.data(), cache.indices.size(), strip)) {
+				cache.indices = std::move(strip);
+				cache.isStrip = true;
+			}
+		}
+#endif
 		cache.vertexData = reinterpret_cast<const GL11_BridgeSceneVertex*>(meshGroup.vertices.data());
 		cache.vertexCount = meshGroup.vertices.size();
 	}

@@ -10,6 +10,7 @@
 #ifdef __DREAMCAST__
 #include <GL/gl.h>
 #include <GL/glext.h>
+#include <GL/glkos.h>
 #endif
 #include <algorithm>
 #include <cstring>
@@ -95,7 +96,14 @@ GLuint GL11_UploadTextureData(void* pixels, int width, int height, bool isUI, fl
 #endif
 	} else {
 #ifdef __DREAMCAST__
+		bool twiddle = !isUI && g_debugTwiddle3D;
+		if (twiddle) {
+			glEnable(GL_TEXTURE_TWIDDLE_KOS);
+		}
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA4, width, height, 0, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV, pixels);
+		if (twiddle) {
+			glDisable(GL_TEXTURE_TWIDDLE_KOS);
+		}
 #else
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 #endif
@@ -366,7 +374,7 @@ void GL11_SubmitDraw(
 	}
 #endif
 
-	GLenum neededShade = mesh.flat ? GL_FLAT : GL_SMOOTH;
+	GLenum neededShade = (mesh.flat || g_debugFlatShaded) ? GL_FLAT : GL_SMOOTH;
 	if (s_currentShadeModel != neededShade) {
 		glShadeModel(neededShade);
 		s_currentShadeModel = neededShade;
@@ -423,7 +431,12 @@ void GL11_SubmitDraw(
 				s_currentTexCoordActive = needTex;
 			}
 
-			glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_SHORT, mesh.indices.data());
+			if (mesh.isStrip) {
+				glDrawElements(GL_TRIANGLE_STRIP, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_SHORT, mesh.indices.data());
+			}
+			else {
+				glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_SHORT, mesh.indices.data());
+			}
 		}
 	}
 }

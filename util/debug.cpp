@@ -78,6 +78,9 @@ bool g_debugDisableTextures = false;
 bool g_debugDisableSound = false;
 bool g_debugDisableMusic = false;
 bool g_debugFlatShaded = false;
+bool g_debugTwiddle3D = true;
+bool g_debugStrips = true;
+int g_debugMaxExtras = -1;
 
 void InitDebugFlags() {
 #ifdef __DREAMCAST__
@@ -89,13 +92,21 @@ void InitDebugFlags() {
             if (strstr(line, "DisableSound=1")) g_debugDisableSound = true;
             if (strstr(line, "DisableMusic=1")) g_debugDisableMusic = true;
             if (strstr(line, "FlatShaded=1")) g_debugFlatShaded = true;
+            if (strstr(line, "Twiddle3D=0")) g_debugTwiddle3D = false;
+            if (strstr(line, "Twiddle3D=1")) g_debugTwiddle3D = true;
+            if (strstr(line, "Strips=0")) g_debugStrips = false;
+            if (strstr(line, "Strips=1")) g_debugStrips = true;
+            char* extStr = strstr(line, "MaxExtras=");
+            if (extStr) g_debugMaxExtras = atoi(extStr + 10);
 #ifdef ISLE_DC_PROFILE
             if (strstr(line, "Profile=0")) g_debugProfile = false;
             if (strstr(line, "Profile=1")) g_debugProfile = true;
 #endif
         }
         fclose(f);
-        SDL_Log("Loaded /cd/debug.ini: Tex=%d Snd=%d Mus=%d Flat=%d", g_debugDisableTextures, g_debugDisableSound, g_debugDisableMusic, g_debugFlatShaded);
+        SDL_Log("Loaded /cd/debug.ini: Tex=%d Snd=%d Mus=%d Flat=%d Twid=%d Strip=%d Extras=%d",
+                g_debugDisableTextures, g_debugDisableSound, g_debugDisableMusic, g_debugFlatShaded,
+                g_debugTwiddle3D, g_debugStrips, g_debugMaxExtras);
     } else {
         SDL_Log("Could not open /cd/debug.ini, using defaults");
     }

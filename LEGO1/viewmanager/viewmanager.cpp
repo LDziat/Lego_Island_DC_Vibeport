@@ -277,10 +277,20 @@ inline void ViewManager::ManageVisibilityAndDetailRecursively(ViewROI* p_from, i
 		}
 
 		if (p_lodLevel == ViewROI::c_lodLevelInvisible) {
+#ifdef __DREAMCAST__
+			if (p_from->GetLodLevel() == ViewROI::c_lodLevelInvisible) {
+				return;
+			}
+#endif
 			if (p_from->GetLodLevel() >= 0) {
 				RemoveROIDetailFromScene(p_from);
 				p_from->SetLodLevel(ViewROI::c_lodLevelInvisible);
 			}
+#ifdef __DREAMCAST__
+			else {
+				p_from->SetLodLevel(ViewROI::c_lodLevelInvisible);
+			}
+#endif
 
 			if (comp != NULL) {
 				for (CompoundObject::const_iterator it = comp->begin(); it != comp->end(); it++) {
@@ -332,12 +342,15 @@ void ViewManager::Update(float p_previousRenderTime, float)
 inline int ViewManager::CalculateFrustumTransformations()
 {
 	flags &= ~c_bit3;
-
 	if (height == 0.0F || front == 0.0F) {
 		return -1;
 	}
 	else {
+#ifdef __DREAMCAST__
+		float fVar7 = tanf(view_angle / 2.0F);
+#else
 		float fVar7 = tan(view_angle / 2.0F);
+#endif
 		view_area_at_one = fVar7 * fVar7 * 4.0F;
 		m_inv_view_area_at_one = (view_area_at_one > 0.0001f) ? (3.14159265359f / view_area_at_one) : 1.0f;
 

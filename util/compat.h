@@ -371,6 +371,11 @@ extern bool g_debugTwiddle3D;
 extern bool g_debugStrips;
 extern int g_debugMaxExtras;
 extern bool g_debugDisableLighting;
+extern int g_debugShadingMode;
+extern float g_debugAmbientLevel;
+extern float g_debugSunDirX;
+extern float g_debugSunDirY;
+extern float g_debugSunDirZ;
 void InitDebugFlags();
 
 #endif // COMPAT_H

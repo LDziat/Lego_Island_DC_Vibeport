@@ -81,7 +81,7 @@ void Direct3DRMViewportImpl::CollectLightsFromFrame(
 )
 {
 #ifdef __DREAMCAST__
-	if (g_debugDisableLighting) {
+	if (g_debugDisableLighting && g_debugShadingMode == 0) {
 		return;
 	}
 #endif

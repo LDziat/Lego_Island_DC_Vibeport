@@ -45,11 +45,17 @@ struct GLTextureCacheEntry {
 	float vScale;
 };
 
+struct GL11_PVRColor {
+	float a, r, g, b;
+};
+
 struct GLMeshCacheEntry {
 	const MeshGroup* meshGroup = nullptr;
 	int version = 0;
 	bool flat = false;
 	bool isStrip = false;
+	GL11_BridgeVector avgNormal = {0.f, 1.f, 0.f};
+	bool isUnlit = false;
 
 	// non-VBO cache: for flat meshes, flatVertices stores deduplicated surface vertices;
 	// for non-flat meshes, flatVertices is empty and vertexData points directly to meshGroup->vertices!
@@ -57,6 +63,9 @@ struct GLMeshCacheEntry {
 	const GL11_BridgeSceneVertex* vertexData = nullptr;
 	size_t vertexCount = 0;
 	std::vector<uint16_t> indices;
+
+	// Per-vertex lit colors (Mode 2)
+	std::vector<GL11_PVRColor> litColors;
 
 	// VBO cache
 	GLuint vboPositions = 0;

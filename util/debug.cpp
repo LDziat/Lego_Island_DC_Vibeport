@@ -82,6 +82,11 @@ bool g_debugTwiddle3D = true;
 bool g_debugStrips = true;
 int g_debugMaxExtras = -1;
 bool g_debugDisableLighting = false;
+int g_debugShadingMode = 1;
+float g_debugAmbientLevel = 0.38f;
+float g_debugSunDirX = 0.408f;
+float g_debugSunDirY = 0.816f;
+float g_debugSunDirZ = -0.408f;
 
 void InitDebugFlags() {
 #ifdef __DREAMCAST__
@@ -98,6 +103,16 @@ void InitDebugFlags() {
             if (strstr(line, "Strips=0")) g_debugStrips = false;
             if (strstr(line, "Strips=1")) g_debugStrips = true;
             if (strstr(line, "DisableLighting=1") || strstr(line, "Lighting=0")) g_debugDisableLighting = true;
+            char* smStr = strstr(line, "ShadingMode=");
+            if (smStr) g_debugShadingMode = atoi(smStr + 12);
+            char* ambStr = strstr(line, "AmbientLevel=");
+            if (ambStr) g_debugAmbientLevel = (float) atof(ambStr + 13);
+            char* sxStr = strstr(line, "SunDirX=");
+            if (sxStr) g_debugSunDirX = (float) atof(sxStr + 8);
+            char* syStr = strstr(line, "SunDirY=");
+            if (syStr) g_debugSunDirY = (float) atof(syStr + 8);
+            char* szStr = strstr(line, "SunDirZ=");
+            if (szStr) g_debugSunDirZ = (float) atof(szStr + 8);
             char* extStr = strstr(line, "MaxExtras=");
             if (extStr) g_debugMaxExtras = atoi(extStr + 10);
 #ifdef ISLE_DC_PROFILE
@@ -106,9 +121,9 @@ void InitDebugFlags() {
 #endif
         }
         fclose(f);
-        SDL_Log("Loaded /cd/debug.ini: Tex=%d Snd=%d Mus=%d Flat=%d Twid=%d Strip=%d Light=%d Extras=%d",
+        SDL_Log("Loaded /cd/debug.ini: Tex=%d Snd=%d Mus=%d Flat=%d Twid=%d Strip=%d Light=%d Shade=%d Extras=%d",
                 g_debugDisableTextures, g_debugDisableSound, g_debugDisableMusic, g_debugFlatShaded,
-                g_debugTwiddle3D, g_debugStrips, !g_debugDisableLighting, g_debugMaxExtras);
+                g_debugTwiddle3D, g_debugStrips, !g_debugDisableLighting, g_debugShadingMode, g_debugMaxExtras);
     } else {
         SDL_Log("Could not open /cd/debug.ini, using defaults");
     }

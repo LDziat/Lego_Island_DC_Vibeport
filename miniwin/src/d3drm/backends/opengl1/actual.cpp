@@ -163,6 +163,23 @@ void GL11_DebugFlashTexture(GLuint texId, int width, int height)
 
 void GL11_UploadMesh(GLMeshCacheEntry& cache, bool hasTexture)
 {
+	// Compute average normal for fast group directional shading
+	float sumX = 0.f, sumY = 0.f, sumZ = 0.f;
+	if (cache.vertexData && cache.vertexCount > 0) {
+		for (size_t i = 0; i < cache.vertexCount; ++i) {
+			sumX += cache.vertexData[i].normal.x;
+			sumY += cache.vertexData[i].normal.y;
+			sumZ += cache.vertexData[i].normal.z;
+		}
+		float lenSq = sumX * sumX + sumY * sumY + sumZ * sumZ;
+		if (lenSq > 0.001f) {
+			float invLen = 1.0f / sqrtf(lenSq);
+			cache.avgNormal = { sumX * invLen, sumY * invLen, sumZ * invLen };
+		} else {
+			cache.avgNormal = { 0.f, 1.f, 0.f };
+		}
+	}
+
 	if (g_useVBOs && cache.vertexData && cache.vertexCount > 0 && !cache.indices.empty()) {
 		mwglGenBuffers(1, &cache.vboPositions);
 		mwglBindBuffer(GL_ARRAY_BUFFER_ARB, cache.vboPositions);
@@ -196,11 +213,16 @@ void GL11_DestroyMesh(GLMeshCacheEntry& cache)
 	cache.flatVertices.shrink_to_fit();
 	cache.indices.clear();
 	cache.indices.shrink_to_fit();
+	cache.litColors.clear();
+	cache.litColors.shrink_to_fit();
 	cache.vertexData = nullptr;
 	cache.vertexCount = 0;
 	cache.meshGroup = nullptr;
 }
 
+#ifdef __DREAMCAST__
+static bool s_currentColorArrayActive = false;
+#endif
 static GLenum s_currentShadeModel = 0;
 static GLuint s_currentBoundTexId = 0xFFFFFFFF;
 static bool s_currentTex2DEnabled = false;
@@ -216,7 +238,7 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	glDisable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
 #ifdef __DREAMCAST__
-	if (g_debugDisableLighting) {
+	if (g_debugDisableLighting || g_debugShadingMode > 0) {
 		glDisable(GL_LIGHTING);
 		glDisable(GL_COLOR_MATERIAL);
 	} else {
@@ -245,11 +267,13 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	glEnableClientState(GL_VERTEX_ARRAY);
 #ifdef __DREAMCAST__
-	if (!g_debugDisableLighting) {
+	if (!g_debugDisableLighting && g_debugShadingMode == 0) {
 		glEnableClientState(GL_NORMAL_ARRAY);
 	} else {
 		glDisableClientState(GL_NORMAL_ARRAY);
 	}
+	s_currentColorArrayActive = false;
+	glDisableClientState(GL_COLOR_ARRAY);
 #else
 	glEnableClientState(GL_NORMAL_ARRAY);
 #endif
@@ -277,7 +301,7 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 void GL11_UploadLight(int lightIdx, GL11_BridgeSceneLight* l)
 {
 #ifdef __DREAMCAST__
-	if (g_debugDisableLighting) {
+	if (g_debugDisableLighting || g_debugShadingMode > 0) {
 		return;
 	}
 #endif
@@ -373,10 +397,22 @@ void GL11_SubmitDraw(
 	}
 
 #ifdef __DREAMCAST__
-	uint32_t col = appearance.color.r | (appearance.color.g << 8) | (appearance.color.b << 16) | (appearance.color.unused << 24);
-	if (s_currentColor != col) {
-		glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.unused);
-		s_currentColor = col;
+	if (g_debugShadingMode == 2 && !mesh.litColors.empty()) {
+		if (!s_currentColorArrayActive) {
+			glEnableClientState(GL_COLOR_ARRAY);
+			s_currentColorArrayActive = true;
+		}
+		glColorPointer(4, GL_FLOAT, sizeof(GL11_PVRColor), mesh.litColors.data());
+	} else {
+		if (s_currentColorArrayActive) {
+			glDisableClientState(GL_COLOR_ARRAY);
+			s_currentColorArrayActive = false;
+		}
+		uint32_t col = appearance.color.r | (appearance.color.g << 8) | (appearance.color.b << 16) | (appearance.color.unused << 24);
+		if (s_currentColor != col) {
+			glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.unused);
+			s_currentColor = col;
+		}
 	}
 #else
 	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.a);
@@ -446,7 +482,7 @@ void GL11_SubmitDraw(
 			if (s_currentVertexBase != basePtr || s_currentTexCoordActive != needTex) {
 				glVertexPointer(3, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, position));
 #ifdef __DREAMCAST__
-				if (!g_debugDisableLighting) {
+				if (!g_debugDisableLighting && g_debugShadingMode == 0) {
 					glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
 				}
 #else

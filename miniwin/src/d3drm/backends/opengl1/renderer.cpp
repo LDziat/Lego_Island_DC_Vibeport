@@ -86,9 +86,6 @@ OpenGL1Renderer::~OpenGL1Renderer()
 void OpenGL1Renderer::PushLights(const SceneLight* lightsArray, size_t count)
 {
 #ifdef __DREAMCAST__
-	// On Dreamcast (GLdc), separate ambient from directional lights.
-	// Ambient light is handled by GL_LIGHT_MODEL_AMBIENT (0 vertex overhead).
-	// Directional light is capped to 1 (1 light evaluated per vertex in GLdc).
 	m_lights.clear();
 	const SceneLight* ambientLight = nullptr;
 	const SceneLight* dirLight = nullptr;
@@ -104,9 +101,34 @@ void OpenGL1Renderer::PushLights(const SceneLight* lightsArray, size_t count)
 
 	if (ambientLight) {
 		m_lights.push_back(*ambientLight);
+		float avgAmb = (ambientLight->color.r + ambientLight->color.g + ambientLight->color.b) / 3.0f;
+		m_ambientIntensity = std::max(g_debugAmbientLevel, avgAmb);
+	} else {
+		m_ambientIntensity = g_debugAmbientLevel;
 	}
+
 	if (dirLight) {
 		m_lights.push_back(*dirLight);
+		// In Direct3DRM, direction points along the light ray. Reverse it so L points towards the light source.
+		float dx = -dirLight->direction.x;
+		float dy = -dirLight->direction.y;
+		float dz = -dirLight->direction.z;
+		float lenSq = dx * dx + dy * dy + dz * dz;
+		if (lenSq > 0.0001f) {
+			float inv = 1.0f / sqrtf(lenSq);
+			m_sunDirWorld = { dx * inv, dy * inv, dz * inv };
+		} else {
+			m_sunDirWorld = { g_debugSunDirX, g_debugSunDirY, g_debugSunDirZ };
+		}
+	} else {
+		m_sunDirWorld = { g_debugSunDirX, g_debugSunDirY, g_debugSunDirZ };
+		float lenSq = m_sunDirWorld.x * m_sunDirWorld.x + m_sunDirWorld.y * m_sunDirWorld.y + m_sunDirWorld.z * m_sunDirWorld.z;
+		if (lenSq > 0.0001f) {
+			float inv = 1.0f / sqrtf(lenSq);
+			m_sunDirWorld.x *= inv;
+			m_sunDirWorld.y *= inv;
+			m_sunDirWorld.z *= inv;
+		}
 	}
 #else
 	if (count > 8) {
@@ -555,6 +577,7 @@ GLMeshCacheEntry GLUploadMesh(const MeshGroup& meshGroup, bool useVBOs)
 	cache.meshGroup = &meshGroup;
 	cache.version = meshGroup.version;
 	cache.flat = meshGroup.quality == D3DRMRENDER_FLAT || meshGroup.quality == D3DRMRENDER_UNLITFLAT;
+	cache.isUnlit = (meshGroup.quality == D3DRMRENDER_UNLITFLAT);
 
 	if (cache.flat) {
 		std::vector<D3DRMVERTEX> flattenedVertices;
@@ -720,13 +743,84 @@ void OpenGL1Renderer::SubmitDraw(
 	DC_COUNT(C_DRAWS, 1);
 	DC_COUNT(C_INDICES, mesh.indices.size());
 
+#ifdef __DREAMCAST__
+	Appearance litAppearance = appearance;
+	if (g_debugShadingMode > 0 && !mesh.isUnlit) {
+		// Transform sun direction into model space
+		float lmx, lmy, lmz;
+		bool hasWorld = (worldMatrix[0][0] != 0.0f || worldMatrix[1][1] != 0.0f || worldMatrix[2][2] != 0.0f);
+		if (hasWorld) {
+			lmx = worldMatrix[0][0] * m_sunDirWorld.x + worldMatrix[0][1] * m_sunDirWorld.y + worldMatrix[0][2] * m_sunDirWorld.z;
+			lmy = worldMatrix[1][0] * m_sunDirWorld.x + worldMatrix[1][1] * m_sunDirWorld.y + worldMatrix[1][2] * m_sunDirWorld.z;
+			lmz = worldMatrix[2][0] * m_sunDirWorld.x + worldMatrix[2][1] * m_sunDirWorld.y + worldMatrix[2][2] * m_sunDirWorld.z;
+		} else {
+			float lvx = viewMatrix[0][0] * m_sunDirWorld.x + viewMatrix[0][1] * m_sunDirWorld.y + viewMatrix[0][2] * m_sunDirWorld.z;
+			float lvy = viewMatrix[0][1] * m_sunDirWorld.x + viewMatrix[0][1] * m_sunDirWorld.y + viewMatrix[0][2] * m_sunDirWorld.z;
+			float lvz = viewMatrix[0][2] * m_sunDirWorld.x + viewMatrix[0][2] * m_sunDirWorld.y + viewMatrix[0][2] * m_sunDirWorld.z;
+			lmx = modelViewMatrix[0][0] * lvx + modelViewMatrix[0][1] * lvy + modelViewMatrix[0][2] * lvz;
+			lmy = modelViewMatrix[1][0] * lvx + modelViewMatrix[1][1] * lvy + modelViewMatrix[1][2] * lvz;
+			lmz = modelViewMatrix[2][0] * lvx + modelViewMatrix[2][1] * lvy + modelViewMatrix[2][2] * lvz;
+		}
+		float lmLenSq = lmx * lmx + lmy * lmy + lmz * lmz;
+		if (lmLenSq > 0.0001f) {
+			float inv = 1.0f / sqrtf(lmLenSq);
+			lmx *= inv;
+			lmy *= inv;
+			lmz *= inv;
+		}
+
+		if (g_debugShadingMode == 1) {
+			// Mode 1: Fast Group/Object Directional Shading
+			float normSq = mesh.avgNormal.x * mesh.avgNormal.x + mesh.avgNormal.y * mesh.avgNormal.y + mesh.avgNormal.z * mesh.avgNormal.z;
+			if (normSq >= 0.01f) {
+				float dot = mesh.avgNormal.x * lmx + mesh.avgNormal.y * lmy + mesh.avgNormal.z * lmz;
+				float halfLambert = 0.5f * dot + 0.5f;
+				if (halfLambert < 0.0f) halfLambert = 0.0f;
+				if (halfLambert > 1.0f) halfLambert = 1.0f;
+				float intensity = m_ambientIntensity + (1.0f - m_ambientIntensity) * halfLambert;
+				if (intensity > 1.0f) intensity = 1.0f;
+				if (intensity < m_ambientIntensity) intensity = m_ambientIntensity;
+
+				litAppearance.color.r = static_cast<Uint8>(std::min(255.0f, appearance.color.r * intensity));
+				litAppearance.color.g = static_cast<Uint8>(std::min(255.0f, appearance.color.g * intensity));
+				litAppearance.color.b = static_cast<Uint8>(std::min(255.0f, appearance.color.b * intensity));
+			}
+			mesh.litColors.clear();
+		} else if (g_debugShadingMode == 2 && mesh.vertexData && mesh.vertexCount > 0) {
+			// Mode 2: Per-Vertex Half-Lambert Shading
+			mesh.litColors.resize(mesh.vertexCount);
+			float baseA = appearance.color.unused / 255.0f;
+			float baseR = appearance.color.r / 255.0f;
+			float baseG = appearance.color.g / 255.0f;
+			float baseB = appearance.color.b / 255.0f;
+			for (size_t i = 0; i < mesh.vertexCount; ++i) {
+				const auto& n = mesh.vertexData[i].normal;
+				float nSq = n.x * n.x + n.y * n.y + n.z * n.z;
+				float intensity = 1.0f;
+				if (nSq >= 0.01f) {
+					float dot = n.x * lmx + n.y * lmy + n.z * lmz;
+					float hl = 0.5f * dot + 0.5f;
+					if (hl < 0.0f) hl = 0.0f;
+					if (hl > 1.0f) hl = 1.0f;
+					intensity = m_ambientIntensity + (1.0f - m_ambientIntensity) * hl;
+					if (intensity > 1.0f) intensity = 1.0f;
+					if (intensity < m_ambientIntensity) intensity = m_ambientIntensity;
+				}
+				mesh.litColors[i] = { baseA, baseR * intensity, baseG * intensity, baseB * intensity };
+			}
+		}
+	}
+#else
+	const Appearance& litAppearance = appearance;
+#endif
+
 	// Bind texture if present
 	if (appearance.textureId != NO_TEXTURE_ID) {
 		auto& tex = m_textures[appearance.textureId];
-		GL11_SubmitDraw(mesh, modelViewMatrix, appearance, tex.glTextureId);
+		GL11_SubmitDraw(mesh, modelViewMatrix, litAppearance, tex.glTextureId);
 	}
 	else {
-		GL11_SubmitDraw(mesh, modelViewMatrix, appearance, 0);
+		GL11_SubmitDraw(mesh, modelViewMatrix, litAppearance, 0);
 	}
 }
 

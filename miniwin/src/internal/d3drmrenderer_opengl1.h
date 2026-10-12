@@ -55,6 +55,8 @@ private:
 	bool m_useNPOT;
 	bool m_dirty = false;
 	std::vector<SceneLight> m_lights;
+	GL11_BridgeVector m_sunDirWorld = { 0.408f, 0.816f, -0.408f };
+	float m_ambientIntensity = 0.38f;
 	SDL_GLContext m_context;
 	ViewportTransform m_viewportTransform;
 	size_t m_frameVerticesSubmitted = 0;

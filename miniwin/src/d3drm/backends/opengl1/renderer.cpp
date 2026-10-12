@@ -83,17 +83,35 @@ OpenGL1Renderer::~OpenGL1Renderer()
 void OpenGL1Renderer::PushLights(const SceneLight* lightsArray, size_t count)
 {
 #ifdef __DREAMCAST__
-	if (count > 2) {
-		count = 2;
+	// On Dreamcast (GLdc), separate ambient from directional lights.
+	// Ambient light is handled by GL_LIGHT_MODEL_AMBIENT (0 vertex overhead).
+	// Directional light is capped to 1 (1 light evaluated per vertex in GLdc).
+	m_lights.clear();
+	const SceneLight* ambientLight = nullptr;
+	const SceneLight* dirLight = nullptr;
+
+	for (size_t i = 0; i < count; ++i) {
+		if (lightsArray[i].positional == 0.f && lightsArray[i].directional == 0.f) {
+			ambientLight = &lightsArray[i];
+		}
+		else if (!dirLight) {
+			dirLight = &lightsArray[i];
+		}
+	}
+
+	if (ambientLight) {
+		m_lights.push_back(*ambientLight);
+	}
+	if (dirLight) {
+		m_lights.push_back(*dirLight);
 	}
 #else
 	if (count > 8) {
 		SDL_Log("Unsupported number of lights (%d)", static_cast<int>(count));
 		count = 8;
 	}
-#endif
-
 	m_lights.assign(lightsArray, lightsArray + count);
+#endif
 }
 
 void OpenGL1Renderer::SetFrustumPlanes(const Plane* frustumPlanes)
@@ -117,6 +135,9 @@ void OpenGL1Renderer::AddTextureDestroyCallback(Uint32 id, IDirect3DRMTexture* t
 		[](IDirect3DRMObject* obj, void* arg) {
 			auto* ctx = static_cast<TextureDestroyContextGL*>(arg);
 			auto& cache = ctx->renderer->m_textures[ctx->textureId];
+			if (cache.texture) {
+				ctx->renderer->m_textureToId.erase(cache.texture);
+			}
 			if (cache.glTextureId != 0) {
 				GL11_DestroyTexture(cache.glTextureId);
 				cache.glTextureId = 0;
@@ -307,7 +328,6 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 
 Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, float scaleX, float scaleY)
 {
-	SDL_GL_MakeCurrent(DDWindow, m_context);
 	auto texture = static_cast<Direct3DRMTextureImpl*>(iTexture);
 	auto surface = static_cast<DirectDrawSurfaceImpl*>(texture->m_surface);
 
@@ -333,20 +353,20 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 	float finalUScale = scaled ? surface->m_surface->w : newW;
 	float finalVScale = scaled ? surface->m_surface->h : newH;
 
-	for (Uint32 i = 0; i < m_textures.size(); ++i) {
-		auto& tex = m_textures[i];
-		if (tex.texture == texture) {
-			if (tex.version != texture->m_version) {
-				GL11_DestroyTexture(tex.glTextureId);
-				tex.glTextureId = UploadTextureData(surface->m_surface, m_useNPOT, isUI, scaleX, scaleY);
-				tex.version = texture->m_version;
-				tex.width = newW;
-				tex.height = newH;
-				tex.uScale = finalUScale;
-				tex.vScale = finalVScale;
-			}
-			return i;
+	auto it = m_textureToId.find(iTexture);
+	if (it != m_textureToId.end()) {
+		Uint32 id = it->second;
+		auto& tex = m_textures[id];
+		if (tex.version != texture->m_version) {
+			GL11_DestroyTexture(tex.glTextureId);
+			tex.glTextureId = UploadTextureData(surface->m_surface, m_useNPOT, isUI, scaleX, scaleY);
+			tex.version = texture->m_version;
+			tex.width = newW;
+			tex.height = newH;
+			tex.uScale = finalUScale;
+			tex.vScale = finalVScale;
 		}
+		return id;
 	}
 
 	GLuint texId = UploadTextureData(surface->m_surface, m_useNPOT, isUI, scaleX, scaleY);
@@ -361,11 +381,13 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 			tex.height = newH;
 			tex.uScale = finalUScale;
 			tex.vScale = finalVScale;
+			m_textureToId[iTexture] = i;
 			AddTextureDestroyCallback(i, texture);
 			return i;
 		}
 	}
 
+	Uint32 newId = (Uint32) m_textures.size();
 	m_textures.push_back(
 		{texture,
 		 texture->m_version,
@@ -375,8 +397,9 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 		 static_cast<float>(finalUScale),
 		 static_cast<float>(finalVScale)}
 	);
-	AddTextureDestroyCallback((Uint32) (m_textures.size() - 1), texture);
-	return (Uint32) (m_textures.size() - 1);
+	m_textureToId[iTexture] = newId;
+	AddTextureDestroyCallback(newId, texture);
+	return newId;
 }
 
 GLMeshCacheEntry GLUploadMesh(const MeshGroup& meshGroup, bool useVBOs)
@@ -428,6 +451,9 @@ void OpenGL1Renderer::AddMeshDestroyCallback(Uint32 id, IDirect3DRMMesh* mesh)
 		[](IDirect3DRMObject*, void* arg) {
 			auto* ctx = static_cast<GLMeshDestroyContext*>(arg);
 			auto& cache = ctx->renderer->m_meshs[ctx->id];
+			if (cache.meshGroup) {
+				ctx->renderer->m_meshGroupToId.erase(cache.meshGroup);
+			}
 			cache.meshGroup = nullptr;
 			GL11_DestroyMesh(cache);
 			delete ctx;
@@ -438,14 +464,14 @@ void OpenGL1Renderer::AddMeshDestroyCallback(Uint32 id, IDirect3DRMMesh* mesh)
 
 Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGroup)
 {
-	for (Uint32 i = 0; i < m_meshs.size(); ++i) {
-		auto& cache = m_meshs[i];
-		if (cache.meshGroup == meshGroup) {
-			if (cache.version != meshGroup->version) {
-				cache = std::move(GLUploadMesh(*meshGroup, m_useVBOs));
-			}
-			return i;
+	auto it = m_meshGroupToId.find(meshGroup);
+	if (it != m_meshGroupToId.end()) {
+		Uint32 id = it->second;
+		auto& cache = m_meshs[id];
+		if (cache.version != meshGroup->version) {
+			cache = std::move(GLUploadMesh(*meshGroup, m_useVBOs));
 		}
+		return id;
 	}
 
 	auto newCache = GLUploadMesh(*meshGroup, m_useVBOs);
@@ -454,14 +480,17 @@ Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGr
 		auto& cache = m_meshs[i];
 		if (!cache.meshGroup) {
 			cache = std::move(newCache);
+			m_meshGroupToId[meshGroup] = i;
 			AddMeshDestroyCallback(i, mesh);
 			return i;
 		}
 	}
 
+	Uint32 newId = (Uint32) m_meshs.size();
 	m_meshs.push_back(std::move(newCache));
-	AddMeshDestroyCallback((Uint32) (m_meshs.size() - 1), mesh);
-	return (Uint32) (m_meshs.size() - 1);
+	m_meshGroupToId[meshGroup] = newId;
+	AddMeshDestroyCallback(newId, mesh);
+	return newId;
 }
 
 HRESULT OpenGL1Renderer::BeginFrame()

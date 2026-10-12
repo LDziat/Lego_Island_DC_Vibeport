@@ -54,6 +54,7 @@ public:
 		}
 	}
 	DWORD GetSize() override { return static_cast<DWORD>(m_items.size()); }
+	const std::vector<ActualType*>& GetItems() const { return m_items; }
 	HRESULT AddElement(InterfaceType* in) override
 	{
 		if (!in) {

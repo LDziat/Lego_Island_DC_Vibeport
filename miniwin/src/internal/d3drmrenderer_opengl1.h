@@ -5,6 +5,7 @@
 #include "ddraw_impl.h"
 
 #include <SDL/SDL.h>
+#include <unordered_map>
 #include <vector>
 
 DEFINE_GUID(OpenGL1_GUID, 0x682656F3, 0x0000, 0x0000, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03);
@@ -46,6 +47,8 @@ private:
 
 	std::vector<GLTextureCacheEntry> m_textures;
 	std::vector<GLMeshCacheEntry> m_meshs;
+	std::unordered_map<const MeshGroup*, Uint32> m_meshGroupToId;
+	std::unordered_map<IDirect3DRMTexture*, Uint32> m_textureToId;
 	D3DRMMATRIX4D m_projection;
 	SDL_Surface* m_renderedImage;
 	bool m_useVBOs;

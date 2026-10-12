@@ -1,8 +1,10 @@
 #include "d3drm_impl.h"
 #include "d3drmframe_impl.h"
+#include "d3drmlight_impl.h"
 #include "d3drmmesh_impl.h"
 #include "d3drmrenderer.h"
 #include "d3drmviewport_impl.h"
+#include "d3drmvisual_impl.h"
 #include "ddraw_impl.h"
 #include "mathutils.h"
 #include "miniwin.h"
@@ -75,50 +77,68 @@ void Direct3DRMViewportImpl::CollectLightsFromFrame(
 	std::vector<SceneLight>& lights
 )
 {
+	if (lights.size() >= 3) {
+		return;
+	}
+
 	auto* frameImpl = static_cast<Direct3DRMFrameImpl*>(frame);
 	D3DRMMATRIX4D worldMatrix;
 	D3DRMMatrixMultiply(worldMatrix, parentToWorld, frameImpl->m_transform);
 
-	IDirect3DRMLightArray* lightArray = nullptr;
-	frame->GetLights(&lightArray);
-	DWORD lightCount = lightArray->GetSize();
-	for (DWORD li = 0; li < lightCount; ++li) {
-		IDirect3DRMLight* light = nullptr;
-		lightArray->GetElement(li, &light);
-		D3DCOLOR color = light->GetColor();
-		SceneLight extracted;
-		extracted.color = {
-			((color >> 16) & 0xFF) / 255.0f,
-			((color >> 8) & 0xFF) / 255.0f,
-			((color >> 0) & 0xFF) / 255.0f,
-			((color >> 24) & 0xFF) / 255.0f
-		};
+	if (frameImpl->m_lights) {
+		const auto& lightItems = frameImpl->m_lights->GetItems();
+		for (auto* light : lightItems) {
+			if (!light) continue;
+			D3DCOLOR color = light->GetColor();
+			SceneLight extracted;
+			extracted.color = {
+				((color >> 16) & 0xFF) / 255.0f,
+				((color >> 8) & 0xFF) / 255.0f,
+				((color >> 0) & 0xFF) / 255.0f,
+				((color >> 24) & 0xFF) / 255.0f
+			};
 
-		D3DRMLIGHTTYPE type = light->GetType();
-		if (type == D3DRMLIGHT_POINT || type == D3DRMLIGHT_SPOT || type == D3DRMLIGHT_PARALLELPOINT) {
-			extracted.position = {worldMatrix[3][0], worldMatrix[3][1], worldMatrix[3][2]};
-			extracted.positional = 1.f;
+			D3DRMLIGHTTYPE type = light->GetType();
+#ifdef __DREAMCAST__
+			if (type == D3DRMLIGHT_POINT || type == D3DRMLIGHT_PARALLELPOINT) {
+				// Convert point lights to directional lights on Dreamcast to eliminate
+				// expensive per-vertex distance, square root, and attenuation math in GLdc
+				D3DVECTOR dir = Normalize({-worldMatrix[3][0], -worldMatrix[3][1], -worldMatrix[3][2]});
+				extracted.direction = dir;
+				extracted.directional = 1.f;
+				extracted.positional = 0.f;
+			}
+			else if (type == D3DRMLIGHT_DIRECTIONAL || type == D3DRMLIGHT_SPOT) {
+				extracted.direction = {worldMatrix[2][0], worldMatrix[2][1], worldMatrix[2][2]};
+				extracted.directional = 1.f;
+			}
+#else
+			if (type == D3DRMLIGHT_POINT || type == D3DRMLIGHT_SPOT || type == D3DRMLIGHT_PARALLELPOINT) {
+				extracted.position = {worldMatrix[3][0], worldMatrix[3][1], worldMatrix[3][2]};
+				extracted.positional = 1.f;
+			}
+			if (type == D3DRMLIGHT_DIRECTIONAL || type == D3DRMLIGHT_SPOT) {
+				extracted.direction = {worldMatrix[2][0], worldMatrix[2][1], worldMatrix[2][2]};
+				extracted.directional = 1.f;
+			}
+#endif
+			lights.push_back(extracted);
+			if (lights.size() >= 3) {
+				return;
+			}
 		}
-		if (type == D3DRMLIGHT_DIRECTIONAL || type == D3DRMLIGHT_SPOT) {
-			extracted.direction = {worldMatrix[2][0], worldMatrix[2][1], worldMatrix[2][2]};
-			extracted.directional = 1.f;
+	}
+
+	if (frameImpl->m_children) {
+		const auto& childItems = frameImpl->m_children->GetItems();
+		for (auto* childFrame : childItems) {
+			if (!childFrame) continue;
+			CollectLightsFromFrame(childFrame, worldMatrix, lights);
+			if (lights.size() >= 3) {
+				return;
+			}
 		}
-
-		lights.push_back(extracted);
-		light->Release();
 	}
-	lightArray->Release();
-
-	IDirect3DRMFrameArray* children = nullptr;
-	frame->GetChildren(&children);
-	DWORD n = children->GetSize();
-	for (DWORD i = 0; i < n; ++i) {
-		IDirect3DRMFrame* childFrame = nullptr;
-		children->GetElement(i, &childFrame);
-		CollectLightsFromFrame(childFrame, worldMatrix, lights);
-		childFrame->Release();
-	}
-	children->Release();
 }
 
 void Direct3DRMViewportImpl::BuildViewFrustumPlanes()
@@ -219,12 +239,12 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 	D3DRMMATRIX4D worldMatrix;
 	MultiplyMatrix(worldMatrix, parentMatrix, localMatrix);
 
-	IDirect3DRMVisualArray* visuals = nullptr;
-	frame->GetVisuals(&visuals);
-	DWORD n = visuals ? visuals->GetSize() : 0;
-	for (DWORD i = 0; i < n; ++i) {
-		IDirect3DRMVisual* visual = nullptr;
-		visuals->GetElement(i, &visual);
+	if (!frameImpl->m_visuals) {
+		return;
+	}
+
+	const auto& visualItems = frameImpl->m_visuals->GetItems();
+	for (auto* visual : visualItems) {
 		if (!visual) {
 			continue;
 		}
@@ -232,7 +252,6 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 		IDirect3DRMFrame* childFrame = visual->AsFrame();
 		if (childFrame) {
 			CollectMeshesFromFrame(childFrame, worldMatrix);
-			visual->Release();
 			continue;
 		}
 
@@ -259,28 +278,23 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 #ifdef __DREAMCAST__
 				// Tier 1: Tiny parts / accessories / small bricks (size < 6): cull beyond 40
 				if (sizeSq < (6.0f * 6.0f) && distSq > (40.0f * 40.0f)) {
-					visual->Release();
 					continue;
 				}
 				// Tier 2: Small props, flowers, minifig parts (size < 18): cull beyond 70
 				if (sizeSq < (18.0f * 18.0f) && distSq > (70.0f * 70.0f)) {
-					visual->Release();
 					continue;
 				}
 				// Tier 3: Medium scenery, trees, streetlamps, vehicles (size < 40): cull beyond 120
 				if (sizeSq < (40.0f * 40.0f) && distSq > (120.0f * 120.0f)) {
-					visual->Release();
 					continue;
 				}
 				// Tier 4: Large scenery / buildings (size < 120): cull beyond 220
 				if (sizeSq < (120.0f * 120.0f) && distSq > (220.0f * 220.0f)) {
-					visual->Release();
 					continue;
 				}
 				// Island terrain meshes have size > 150-200, so they are never distance-culled!
 #else
 				if (sizeSq < (30.0f * 30.0f) && distSq > (100.0f * 100.0f)) {
-					visual->Release();
 					continue;
 				}
 #endif
@@ -324,10 +338,6 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 				}
 			}
 		}
-		visual->Release();
-	}
-	if (visuals) {
-		visuals->Release();
 	}
 }
 

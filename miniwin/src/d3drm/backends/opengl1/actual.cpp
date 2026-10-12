@@ -192,6 +192,11 @@ static GLenum s_currentShadeModel = 0;
 static GLuint s_currentBoundTexId = 0xFFFFFFFF;
 static bool s_currentTex2DEnabled = false;
 static float s_currentShininess = -1.0f;
+static const void* s_currentVertexBase = nullptr;
+static bool s_currentTexCoordActive = false;
+static uint32_t s_currentColor = 0xFFFFFFFF;
+static Matrix4x4 s_currentModelViewMatrix = {};
+static bool s_hasModelViewMatrix = false;
 
 void GL11_BeginFrame(const Matrix4x4* projection)
 {
@@ -210,6 +215,10 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	s_currentBoundTexId = 0xFFFFFFFF;
 	s_currentTex2DEnabled = false;
 	s_currentShininess = -1.0f;
+	s_currentVertexBase = nullptr;
+	s_currentTexCoordActive = false;
+	s_currentColor = 0xFFFFFFFF;
+	s_hasModelViewMatrix = false;
 	glDisable(GL_TEXTURE_2D);
 	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -308,10 +317,18 @@ void GL11_SubmitDraw(
 	GLuint texId
 )
 {
-	glLoadMatrixf(&modelViewMatrix[0][0]);
+	if (!s_hasModelViewMatrix || memcmp(&s_currentModelViewMatrix, &modelViewMatrix, sizeof(Matrix4x4)) != 0) {
+		glLoadMatrixf(&modelViewMatrix[0][0]);
+		memcpy(&s_currentModelViewMatrix, &modelViewMatrix, sizeof(Matrix4x4));
+		s_hasModelViewMatrix = true;
+	}
 
 #ifdef __DREAMCAST__
-	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.unused);
+	uint32_t col = appearance.color.r | (appearance.color.g << 8) | (appearance.color.b << 16) | (appearance.color.unused << 24);
+	if (s_currentColor != col) {
+		glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.unused);
+		s_currentColor = col;
+	}
 #else
 	glColor4ub(appearance.color.r, appearance.color.g, appearance.color.b, appearance.color.a);
 
@@ -377,10 +394,14 @@ void GL11_SubmitDraw(
 	else {
 		if (mesh.vertexData && !mesh.indices.empty()) {
 			const char* basePtr = reinterpret_cast<const char*>(mesh.vertexData);
-			glVertexPointer(3, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, position));
-			glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
-			if (needTex) {
-				glTexCoordPointer(2, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, tu));
+			if (s_currentVertexBase != basePtr || s_currentTexCoordActive != needTex) {
+				glVertexPointer(3, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, position));
+				glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
+				if (needTex) {
+					glTexCoordPointer(2, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, tu));
+				}
+				s_currentVertexBase = basePtr;
+				s_currentTexCoordActive = needTex;
 			}
 
 			glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indices.size()), GL_UNSIGNED_SHORT, mesh.indices.data());
@@ -471,17 +492,19 @@ void GL11_Draw2DImage(
 	s_currentBoundTexId = 0xFFFFFFFF;
 	s_currentTex2DEnabled = false;
 	s_currentShadeModel = 0;
+	s_currentVertexBase = nullptr;
+	s_currentTexCoordActive = false;
+	s_currentColor = 0xFFFFFFFF;
+	s_hasModelViewMatrix = false;
 	// Restore state
 	glMatrixMode(GL_MODELVIEW);
 }
 
 void GL11_Download(SDL_Surface* target)
 {
+#ifndef __DREAMCAST__
 	glFinish();
-	#ifndef __DREAMCAST__
-	#ifndef __DREAMCAST__
 	glReadPixels(0, 0, target->w, target->h, GL_RGBA, GL_UNSIGNED_BYTE, target->pixels);
-#endif
 #endif
 }
 

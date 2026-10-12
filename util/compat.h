@@ -370,6 +370,7 @@ extern bool g_debugFlatShaded;
 extern bool g_debugTwiddle3D;
 extern bool g_debugStrips;
 extern int g_debugMaxExtras;
+extern bool g_debugDisableLighting;
 void InitDebugFlags();
 
 #endif // COMPAT_H

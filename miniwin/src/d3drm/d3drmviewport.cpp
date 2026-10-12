@@ -80,6 +80,11 @@ void Direct3DRMViewportImpl::CollectLightsFromFrame(
 	std::vector<SceneLight>& lights
 )
 {
+#ifdef __DREAMCAST__
+	if (g_debugDisableLighting) {
+		return;
+	}
+#endif
 	if (lights.size() >= 3) {
 		return;
 	}
@@ -303,6 +308,9 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 	D3DRMMATRIX4D modelViewMatrix;
 
 	const auto& visualItems = frameImpl->m_visuals->GetItems();
+	if (visualItems.empty()) {
+		return;
+	}
 	for (auto* visual : visualItems) {
 		if (!visual) {
 			continue;

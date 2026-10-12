@@ -7,6 +7,7 @@
 #include "mxtimer.h"
 
 #include <SDL/SDL_stdinc.h>
+#include <vector>
 
 DECOMP_SIZE_ASSERT(LegoPathController, 0x40)
 DECOMP_SIZE_ASSERT(LegoPathCtrlEdge, 0x40)
@@ -381,6 +382,25 @@ void LegoPathController::AnimateActors()
 {
 	float time = Timer()->GetTime();
 
+#ifdef __DREAMCAST__
+	// Avoid allocating and deallocating a std::set (RB-tree nodes on heap) every 10ms tick.
+	static std::vector<LegoPathActor*> s_lpas;
+	s_lpas.clear();
+	s_lpas.reserve(m_actors.size());
+	for (auto* actor : m_actors) {
+		s_lpas.push_back(actor);
+	}
+
+	for (size_t i = 0; i < s_lpas.size(); ++i) {
+		LegoPathActor* actor = s_lpas[i];
+
+		if (m_actors.find(actor) != m_actors.end()) {
+			if (!((MxU8) actor->GetActorState() & LegoPathActor::c_disabled)) {
+				actor->Animate(time);
+			}
+		}
+	}
+#else
 	LegoPathActorSet lpas(m_actors);
 
 	for (LegoPathActorSet::iterator itpa = lpas.begin(); itpa != lpas.end(); itpa++) {
@@ -392,6 +412,7 @@ void LegoPathController::AnimateActors()
 			}
 		}
 	}
+#endif
 }
 
 // FUNCTION: LEGO1 0x10046b30

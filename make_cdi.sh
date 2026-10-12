@@ -4,3 +4,7 @@ sh-elf-objcopy -O binary build_kos/isle.elf build_kos/isle.bin
 scramble build_kos/isle.bin build_kos/cd_root/1ST_READ.BIN
 mkisofs -C 0,11702 -V LEGO_ISLAND -G ip.bin -r -J -l -m "desktop.ini" -o build_kos/isle.iso build_kos/cd_root
 cdi4dc build_kos/isle.iso build_kos/isle.cdi
+cp build_kos/isle.cdi "/c/Users/ldzia/Desktop/isle.cdi"
+cp build_kos/isle.elf "/c/Users/ldzia/Desktop/isle.elf"
+cp build_kos/isle.cdi "/c/Users/ldzia/Desktop/Dreamcast/isle.cdi"
+cp build_kos/isle.cdi "/c/Users/ldzia/Desktop/LegoIslandDreamcastPort/beta_4.cdi"

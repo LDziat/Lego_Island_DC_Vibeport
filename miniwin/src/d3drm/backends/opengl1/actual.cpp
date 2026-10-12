@@ -215,9 +215,18 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 {
 	glDisable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_TRUE);
+#ifdef __DREAMCAST__
+	if (g_debugDisableLighting) {
+		glDisable(GL_LIGHTING);
+		glDisable(GL_COLOR_MATERIAL);
+	} else {
+		glEnable(GL_LIGHTING);
+		glEnable(GL_COLOR_MATERIAL);
+	}
+#else
 	glEnable(GL_LIGHTING);
 	glEnable(GL_COLOR_MATERIAL);
+#endif
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
 	glEnable(GL_CULL_FACE);
@@ -235,7 +244,15 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 	glDisable(GL_TEXTURE_2D);
 	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	glEnableClientState(GL_VERTEX_ARRAY);
+#ifdef __DREAMCAST__
+	if (!g_debugDisableLighting) {
+		glEnableClientState(GL_NORMAL_ARRAY);
+	} else {
+		glDisableClientState(GL_NORMAL_ARRAY);
+	}
+#else
 	glEnableClientState(GL_NORMAL_ARRAY);
+#endif
 
 	// Disable all lights and reset global ambient
 	for (int i = 0; i < 8; ++i) {
@@ -259,6 +276,11 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 
 void GL11_UploadLight(int lightIdx, GL11_BridgeSceneLight* l)
 {
+#ifdef __DREAMCAST__
+	if (g_debugDisableLighting) {
+		return;
+	}
+#endif
 	// Setup light
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
@@ -423,7 +445,13 @@ void GL11_SubmitDraw(
 			const char* basePtr = reinterpret_cast<const char*>(mesh.vertexData);
 			if (s_currentVertexBase != basePtr || s_currentTexCoordActive != needTex) {
 				glVertexPointer(3, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, position));
+#ifdef __DREAMCAST__
+				if (!g_debugDisableLighting) {
+					glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
+				}
+#else
 				glNormalPointer(GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, normal));
+#endif
 				if (needTex) {
 					glTexCoordPointer(2, GL_FLOAT, sizeof(GL11_BridgeSceneVertex), basePtr + offsetof(GL11_BridgeSceneVertex, tu));
 				}

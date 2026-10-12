@@ -293,7 +293,11 @@ inline Result ViewSetFrustrum(
 	float degrees
 )
 {
+#ifdef __DREAMCAST__
+	float field = frontClippingDistance * tanf(DegreesToRadians(degrees / 2.0f));
+#else
 	float field = frontClippingDistance * tan(DegreesToRadians(degrees / 2));
+#endif
 	Result result;
 	result = ResultVal(pViewport->SetFront(frontClippingDistance));
 	if (Succeeded(result)) {

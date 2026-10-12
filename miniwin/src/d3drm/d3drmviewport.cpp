@@ -312,15 +312,10 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 				hasModelView = true;
 			}
 
-			// Tiered distance culling
-			D3DRMBOX box;
-			mesh->GetBox(&box);
-			bool isValidBox = (box.min.x <= box.max.x && box.min.y <= box.max.y && box.min.z <= box.max.z);
-			if (isValidBox) {
-				float extentX = box.max.x - box.min.x;
-				float extentY = box.max.y - box.min.y;
-				float extentZ = box.max.z - box.min.z;
-				float sizeSq = extentX * extentX + extentY * extentY + extentZ * extentZ;
+			// Tiered distance culling using precalculated bounding sphere radius
+			float radius = mesh->GetSphereRadius();
+			if (radius > 0.0f) {
+				float sizeSq = 4.0f * radius * radius;
 				float vx = modelViewMatrix[3][0];
 				float vy = modelViewMatrix[3][1];
 				float vz = modelViewMatrix[3][2];

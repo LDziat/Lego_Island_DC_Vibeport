@@ -57,6 +57,7 @@ ViewManager::ViewManager(Tgl::Renderer* pRenderer, Tgl::Group* scene, const Orie
 
 	memset(transformed_points, 0, sizeof(transformed_points));
 	seconds_allowed = 1.0;
+	m_inv_view_area_at_one = 1.0f;
 }
 
 // FUNCTION: LEGO1 0x100a60c0
@@ -238,10 +239,26 @@ inline void ViewManager::ManageVisibilityAndDetailRecursively(ViewROI* p_from, i
 		const CompoundObject* comp = p_from->GetComp();
 
 		if (p_lodLevel == ViewROI::c_lodLevelUnset) {
+			const BoundingSphere& sphere = p_from->GetWorldBoundingSphere();
+			float radius = sphere.Radius();
+
 			// FIX: Use 0.002 threshold to avoid x87 extended precision boundary
 			// issues where 0.001 sentinel radius compares as > 0.001F on x87.
-			if (p_from->GetWorldBoundingSphere().Radius() > 0.002F) {
-				float projectedSize = ProjectedSize(p_from->GetWorldBoundingSphere());
+			if (radius > 0.002F) {
+				float distSq = DISTSQRD3(sphere.Center(), pov[3]);
+
+				// Early distance-squared rejection: any normal-sized object (radius < 80,
+				// excluding island terrain chunks) beyond 240 units is guaranteed to have
+				// projected size below the visibility threshold.
+				if (radius < 80.0f && distSq > (240.0f * 240.0f)) {
+					if (p_from->GetLodLevel() != ViewROI::c_lodLevelInvisible) {
+						ManageVisibilityAndDetailRecursively(p_from, ViewROI::c_lodLevelInvisible);
+					}
+					return;
+				}
+
+				float sphere_projected_area = (radius * radius) * m_inv_view_area_at_one;
+				float projectedSize = (distSq > 0.0001f) ? (sphere_projected_area / distSq) : sphere_projected_area;
 
 				if (RealtimeView::GetUserMaxLOD() <= 5.0f && projectedSize < seconds_allowed * g_viewDistance) {
 					if (p_from->GetLodLevel() != ViewROI::c_lodLevelInvisible) {
@@ -319,6 +336,7 @@ inline int ViewManager::CalculateFrustumTransformations()
 	else {
 		float fVar7 = tan(view_angle / 2.0F);
 		view_area_at_one = fVar7 * fVar7 * 4.0F;
+		m_inv_view_area_at_one = (view_area_at_one > 0.0001f) ? (3.14159265359f / view_area_at_one) : 1.0f;
 
 		float fVar1 = front * fVar7;
 		float fVar2 = (width / height) * fVar1;
@@ -504,9 +522,10 @@ float ViewManager::ProjectedSize(const BoundingSphere& p_bounding_sphere)
 	// is then the ratio of the area of that projected circle to the view surface area
 	// at Z == 1.0.
 	//
-	float sphere_projected_area = 3.14159265359 * p_bounding_sphere.Radius() * p_bounding_sphere.Radius();
+	float r = p_bounding_sphere.Radius();
+	float sphere_projected_area = (r * r) * m_inv_view_area_at_one;
 	float square_dist_to_sphere = DISTSQRD3(p_bounding_sphere.Center(), pov[3]);
-	return sphere_projected_area / view_area_at_one / square_dist_to_sphere;
+	return (square_dist_to_sphere > 0.0001f) ? (sphere_projected_area / square_dist_to_sphere) : sphere_projected_area;
 }
 
 // FUNCTION: LEGO1 0x100a6e00

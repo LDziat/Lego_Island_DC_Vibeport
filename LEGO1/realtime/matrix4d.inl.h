@@ -120,17 +120,49 @@ void Matrix4::SetTranslation(const float& p_x, const float& p_y, const float& p_
 // FUNCTION: BETA10 0x100100a0
 void Matrix4::Product(float (*p_a)[4], float (*p_b)[4])
 {
-	float* cur = (float*) m_data;
+	float tmp[4][4];
 
-	for (int row = 0; row < 4; row++) {
-		for (int col = 0; col < 4; col++) {
-			*cur = 0.0f;
-			for (int k = 0; k < 4; k++) {
-				*cur += p_a[row][k] * p_b[k][col];
+	// Affine fast-path: for standard 3D transforms, the fourth column is [0, 0, 0, 1]^T.
+	// This reduces 64 floating-point multiplications down to 36 and eliminates 3 nested loops.
+	if (p_a[0][3] == 0.0f && p_a[1][3] == 0.0f && p_a[2][3] == 0.0f && p_a[3][3] == 1.0f &&
+	    p_b[0][3] == 0.0f && p_b[1][3] == 0.0f && p_b[2][3] == 0.0f && p_b[3][3] == 1.0f) {
+		// Row 0
+		tmp[0][0] = p_a[0][0] * p_b[0][0] + p_a[0][1] * p_b[1][0] + p_a[0][2] * p_b[2][0];
+		tmp[0][1] = p_a[0][0] * p_b[0][1] + p_a[0][1] * p_b[1][1] + p_a[0][2] * p_b[2][1];
+		tmp[0][2] = p_a[0][0] * p_b[0][2] + p_a[0][1] * p_b[1][2] + p_a[0][2] * p_b[2][2];
+		tmp[0][3] = 0.0f;
+
+		// Row 1
+		tmp[1][0] = p_a[1][0] * p_b[0][0] + p_a[1][1] * p_b[1][0] + p_a[1][2] * p_b[2][0];
+		tmp[1][1] = p_a[1][0] * p_b[0][1] + p_a[1][1] * p_b[1][1] + p_a[1][2] * p_b[2][1];
+		tmp[1][2] = p_a[1][0] * p_b[0][2] + p_a[1][1] * p_b[1][2] + p_a[1][2] * p_b[2][2];
+		tmp[1][3] = 0.0f;
+
+		// Row 2
+		tmp[2][0] = p_a[2][0] * p_b[0][0] + p_a[2][1] * p_b[1][0] + p_a[2][2] * p_b[2][0];
+		tmp[2][1] = p_a[2][0] * p_b[0][1] + p_a[2][1] * p_b[1][1] + p_a[2][2] * p_b[2][1];
+		tmp[2][2] = p_a[2][0] * p_b[0][2] + p_a[2][1] * p_b[1][2] + p_a[2][2] * p_b[2][2];
+		tmp[2][3] = 0.0f;
+
+		// Row 3 (Translation)
+		tmp[3][0] = p_a[3][0] * p_b[0][0] + p_a[3][1] * p_b[1][0] + p_a[3][2] * p_b[2][0] + p_b[3][0];
+		tmp[3][1] = p_a[3][0] * p_b[0][1] + p_a[3][1] * p_b[1][1] + p_a[3][2] * p_b[2][1] + p_b[3][1];
+		tmp[3][2] = p_a[3][0] * p_b[0][2] + p_a[3][1] * p_b[1][2] + p_a[3][2] * p_b[2][2] + p_b[3][2];
+		tmp[3][3] = 1.0f;
+	}
+	else {
+		// General 4x4 matrix multiplication (unrolled)
+		for (int row = 0; row < 4; ++row) {
+			for (int col = 0; col < 4; ++col) {
+				tmp[row][col] = p_a[row][0] * p_b[0][col] +
+				                p_a[row][1] * p_b[1][col] +
+				                p_a[row][2] * p_b[2][col] +
+				                p_a[row][3] * p_b[3][col];
 			}
-			cur++;
 		}
 	}
+
+	memcpy(m_data, tmp, sizeof(tmp));
 }
 
 // FUNCTION: LEGO1 0x10002530

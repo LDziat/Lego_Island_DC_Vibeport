@@ -75,6 +75,7 @@ private:
 	IDirect3DRM2* d3drm;            // 0x1b0
 	IDirect3DRMFrame2* frame;       // 0x1b4
 	float seconds_allowed;          // 0x1b8
+	float m_inv_view_area_at_one;   // Cached 3.14159f / view_area_at_one
 };
 
 // TEMPLATE: LEGO1 0x10022030

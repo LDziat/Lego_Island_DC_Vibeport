@@ -10,8 +10,6 @@
 struct DeferredDrawCommand {
 	DWORD meshId;
 	D3DRMMATRIX4D modelViewMatrix;
-	D3DRMMATRIX4D worldMatrix;
-	Matrix3x3 normalMatrix;
 	Appearance appearance;
 	float depth;
 };

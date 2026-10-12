@@ -168,7 +168,13 @@ bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMat
 {
 	float r = mesh->GetSphereRadius();
 	if (r > 0.0f) {
-		D3DVECTOR viewCenter = TransformPoint(mesh->GetSphereCenter(), worldViewMatrix);
+		D3DVECTOR viewCenter;
+		if (mesh->IsSphereAtOrigin()) {
+			viewCenter = {worldViewMatrix[3][0], worldViewMatrix[3][1], worldViewMatrix[3][2]};
+		}
+		else {
+			viewCenter = TransformPoint(mesh->GetSphereCenter(), worldViewMatrix);
+		}
 		float nearZ = -frustumPlanes[4].d;
 		float farZ = frustumPlanes[5].d;
 
@@ -177,14 +183,12 @@ bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMat
 			return false;
 		}
 
-		// 2. Fast side planes (0..3) test on bounding sphere
-		for (int i = 0; i < 4; ++i) {
-			const Plane& plane = frustumPlanes[i];
-			float dist = plane.normal.x * viewCenter.x + plane.normal.y * viewCenter.y + plane.normal.z * viewCenter.z;
-			if (dist < -r) {
-				return false;
-			}
-		}
+		// 2. Fast side planes (0..3) test on bounding sphere (planes 0/1 have y=0, planes 2/3 have x=0)
+		float rNeg = -r;
+		if ((frustumPlanes[0].normal.x * viewCenter.x + frustumPlanes[0].normal.z * viewCenter.z) < rNeg) return false;
+		if ((frustumPlanes[1].normal.x * viewCenter.x + frustumPlanes[1].normal.z * viewCenter.z) < rNeg) return false;
+		if ((frustumPlanes[2].normal.y * viewCenter.y + frustumPlanes[2].normal.z * viewCenter.z) < rNeg) return false;
+		if ((frustumPlanes[3].normal.y * viewCenter.y + frustumPlanes[3].normal.z * viewCenter.z) < rNeg) return false;
 
 #ifdef __DREAMCAST__
 		// Conservative sphere culling: guaranteed visible without transforming 8 box corners
@@ -272,9 +276,13 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 	D3DRMMATRIX4D worldMatrix;
 	bool worldIsIdentity = false;
 
-	if (parentIsIdentity) {
+	if (parentIsIdentity && frameImpl->m_isIdentity) {
 		memcpy(worldMatrix, frameImpl->m_transform, sizeof(D3DRMMATRIX4D));
-		worldIsIdentity = frameImpl->m_isIdentity;
+		worldIsIdentity = true;
+	}
+	else if (parentIsIdentity) {
+		memcpy(worldMatrix, frameImpl->m_transform, sizeof(D3DRMMATRIX4D));
+		worldIsIdentity = false;
 	}
 	else if (frameImpl->m_isIdentity) {
 		memcpy(worldMatrix, parentMatrix, sizeof(D3DRMMATRIX4D));
@@ -308,14 +316,19 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 		if (meshInterface) {
 			Direct3DRMMeshImpl* mesh = static_cast<Direct3DRMMeshImpl*>(meshInterface);
 			if (!hasModelView) {
-				MultiplyMatrixAffine(modelViewMatrix, worldMatrix, m_viewMatrix);
+				if (worldIsIdentity) {
+					memcpy(modelViewMatrix, m_viewMatrix, sizeof(D3DRMMATRIX4D));
+				}
+				else {
+					MultiplyMatrixAffine(modelViewMatrix, worldMatrix, m_viewMatrix);
+				}
 				hasModelView = true;
 			}
 
-			// Tiered distance culling using precalculated bounding sphere radius
+			// Tiered distance culling using precalculated bounding sphere size squared
 			float radius = mesh->GetSphereRadius();
 			if (radius > 0.0f) {
-				float sizeSq = 4.0f * radius * radius;
+				float sizeSq = mesh->GetSphereSizeSq();
 				float vx = modelViewMatrix[3][0];
 				float vy = modelViewMatrix[3][1];
 				float vz = modelViewMatrix[3][2];
@@ -360,16 +373,12 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 
 					static const Matrix3x3 dummyNormalMatrix = {};
 					if (appearance.color.unused != 255) {
-						m_deferredDraws.push_back(
-							{m_renderer->GetMeshId(mesh, &meshGroup),
-							 {},
-							 {},
-							 {},
-							 appearance,
-							 modelViewMatrix[3][2]}
-						);
-						memcpy(m_deferredDraws.back().modelViewMatrix, modelViewMatrix, sizeof(D3DRMMATRIX4D));
-						memcpy(m_deferredDraws.back().worldMatrix, worldMatrix, sizeof(D3DRMMATRIX4D));
+						m_deferredDraws.push_back(DeferredDrawCommand());
+						DeferredDrawCommand& cmd = m_deferredDraws.back();
+						cmd.meshId = m_renderer->GetMeshId(mesh, &meshGroup);
+						memcpy(cmd.modelViewMatrix, modelViewMatrix, sizeof(D3DRMMATRIX4D));
+						cmd.appearance = appearance;
+						cmd.depth = modelViewMatrix[3][2];
 					}
 					else {
 						m_renderer->SubmitDraw(
@@ -395,7 +404,6 @@ HRESULT Direct3DRMViewportImpl::RenderScene()
 	D3DRMMATRIX4D cameraWorld;
 	ComputeFrameWorldMatrix(m_camera, cameraWorld);
 	D3DRMMatrixInvertOrthogonal(m_viewMatrix, cameraWorld);
-	D3DRMMatrixMultiply(m_viewProjectionwMatrix, m_viewMatrix, m_projectionMatrix);
 
 	D3DRMMATRIX4D identity = {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 0.f}, {0.f, 0.f, 1.f, 0.f}, {0.f, 0.f, 0.f, 1.f}};
 
@@ -419,13 +427,15 @@ HRESULT Direct3DRMViewportImpl::RenderScene()
 			[](const DeferredDrawCommand& a, const DeferredDrawCommand& b) { return a.depth > b.depth; }
 		);
 		m_renderer->EnableTransparency();
+		static const D3DRMMATRIX4D dummyWorldMatrix = {};
+		static const Matrix3x3 dummyNormalMatrix = {};
 		for (const DeferredDrawCommand& cmd : m_deferredDraws) {
 			m_renderer->SubmitDraw(
 				cmd.meshId,
 				cmd.modelViewMatrix,
-				cmd.worldMatrix,
+				dummyWorldMatrix,
 				m_viewMatrix,
-				cmd.normalMatrix,
+				dummyNormalMatrix,
 				cmd.appearance
 			);
 		}

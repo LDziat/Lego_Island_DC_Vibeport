@@ -247,10 +247,11 @@ inline void ViewManager::ManageVisibilityAndDetailRecursively(ViewROI* p_from, i
 			if (radius > 0.002F) {
 				float distSq = DISTSQRD3(sphere.Center(), pov[3]);
 
-				// Early distance-squared rejection: any normal-sized object (radius < 80,
-				// excluding island terrain chunks) beyond 240 units is guaranteed to have
-				// projected size below the visibility threshold.
-				if (radius < 80.0f && distSq > (240.0f * 240.0f)) {
+				// Tiered early distance-squared rejection: eliminates tiny/medium objects
+				// from being projected or evaluated, keeping island terrain (radius > 150) intact.
+				if ((radius < 12.0f && distSq > (90.0f * 90.0f)) ||
+				    (radius < 30.0f && distSq > (160.0f * 160.0f)) ||
+				    (radius < 80.0f && distSq > (240.0f * 240.0f))) {
 					if (p_from->GetLodLevel() != ViewROI::c_lodLevelInvisible) {
 						ManageVisibilityAndDetailRecursively(p_from, ViewROI::c_lodLevelInvisible);
 					}

@@ -319,10 +319,14 @@ void Direct3DRMMeshImpl::UpdateBox()
 		float dy = m_box.max.y - m_sphereCenter.y;
 		float dz = m_box.max.z - m_sphereCenter.z;
 		m_sphereRadius = sqrtf(dx * dx + dy * dy + dz * dz);
+		m_sphereSizeSq = 4.0f * m_sphereRadius * m_sphereRadius;
+		m_sphereIsOrigin = (m_sphereCenter.x == 0.0f && m_sphereCenter.y == 0.0f && m_sphereCenter.z == 0.0f);
 	}
 	else {
 		m_sphereCenter = {0.0f, 0.0f, 0.0f};
 		m_sphereRadius = 0.0f;
+		m_sphereSizeSq = 0.0f;
+		m_sphereIsOrigin = true;
 	}
 }
 

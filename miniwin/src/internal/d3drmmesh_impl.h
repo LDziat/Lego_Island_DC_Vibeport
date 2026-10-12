@@ -110,6 +110,8 @@ struct Direct3DRMMeshImpl : public Direct3DRMObjectBaseImpl<IDirect3DRMMesh> {
 	HRESULT GetBox(D3DRMBOX* box) override;
 	const D3DVECTOR& GetSphereCenter() const { return m_sphereCenter; }
 	float GetSphereRadius() const { return m_sphereRadius; }
+	float GetSphereSizeSq() const { return m_sphereSizeSq; }
+	bool IsSphereAtOrigin() const { return m_sphereIsOrigin; }
 
 private:
 	void UpdateBox();
@@ -118,4 +120,6 @@ private:
 	D3DRMBOX m_box;
 	D3DVECTOR m_sphereCenter = {0.0f, 0.0f, 0.0f};
 	float m_sphereRadius = 0.0f;
+	float m_sphereSizeSq = 0.0f;
+	bool m_sphereIsOrigin = true;
 };

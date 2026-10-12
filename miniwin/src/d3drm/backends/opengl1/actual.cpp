@@ -86,11 +86,16 @@ GLuint GL11_UploadTextureData(void* pixels, int width, int height, bool isUI, fl
 
 	if (g_debugDisableTextures && !isUI) {
 		// Upload a 1x1 white dummy texture to save RAM and avoid crash
+#ifdef __DREAMCAST__
+		Uint16 dummyPixel = 0xFFFF;
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA4, 1, 1, 0, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV, &dummyPixel);
+#else
 		Uint32 dummyPixel = 0xFFFFFFFF;
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &dummyPixel);
+#endif
 	} else {
 #ifdef __DREAMCAST__
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA4, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA4, width, height, 0, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV, pixels);
 #else
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 #endif
@@ -103,7 +108,7 @@ void GL11_UpdateTextureRow(GLuint texId, int xoffset, int yoffset, int width, vo
 {
 	glBindTexture(GL_TEXTURE_2D, texId);
 #ifdef __DREAMCAST__
-	glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, width, 1, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV, pixels);
 #else
 	glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 #endif
@@ -310,6 +315,20 @@ void GL11_EnableTransparency()
 
 #define NO_TEXTURE_ID 0xffffffff
 
+static inline bool Matrix4x4Equals(const Matrix4x4& a, const Matrix4x4& b) {
+	// Translation row almost always differs between different objects: check it first
+	if (a[3][0] != b[3][0] || a[3][1] != b[3][1] || a[3][2] != b[3][2]) return false;
+	// Scale diagonal check
+	if (a[0][0] != b[0][0] || a[1][1] != b[1][1] || a[2][2] != b[2][2]) return false;
+	// Fast word-by-word comparison for remaining elements
+	const uint32_t* pa = reinterpret_cast<const uint32_t*>(&a);
+	const uint32_t* pb = reinterpret_cast<const uint32_t*>(&b);
+	for (int i = 0; i < 16; ++i) {
+		if (pa[i] != pb[i]) return false;
+	}
+	return true;
+}
+
 void GL11_SubmitDraw(
 	GLMeshCacheEntry& mesh,
 	const Matrix4x4& modelViewMatrix,
@@ -317,7 +336,7 @@ void GL11_SubmitDraw(
 	GLuint texId
 )
 {
-	if (!s_hasModelViewMatrix || memcmp(&s_currentModelViewMatrix, &modelViewMatrix, sizeof(Matrix4x4)) != 0) {
+	if (!s_hasModelViewMatrix || !Matrix4x4Equals(s_currentModelViewMatrix, modelViewMatrix)) {
 		glLoadMatrixf(&modelViewMatrix[0][0]);
 		memcpy(&s_currentModelViewMatrix, &modelViewMatrix, sizeof(Matrix4x4));
 		s_hasModelViewMatrix = true;

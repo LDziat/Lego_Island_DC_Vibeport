@@ -177,7 +177,7 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 	if (newW < 8) newW = 8;
 	if (newH < 8) newH = 8;
 	
-	std::vector<Uint32> fullBuffer;
+	std::vector<Uint16> fullBuffer;
 	fullBuffer.resize(newW * newH);
 	
 	SDL_Palette* pal = src->format->palette;
@@ -193,8 +193,11 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 					int srcX = (x * src->w) / newW;
 					Uint8 index = srcRow[srcX];
 					SDL_Color c = pal->colors[index];
-					Uint32 a = (hasColorkey && index == colorkey) ? 0x00 : 0xFF;
-					fullBuffer[y * newW + x] = c.r | (c.g << 8) | (c.b << 16) | (a << 24);
+					Uint16 a4 = (hasColorkey && index == colorkey) ? 0 : 0xF;
+					Uint16 r4 = c.r >> 4;
+					Uint16 g4 = c.g >> 4;
+					Uint16 b4 = c.b >> 4;
+					fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
 				}
 			}
 		} else {
@@ -203,8 +206,11 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				for (int x = 0; x < src->w; ++x) {
 					Uint8 index = srcRow[x];
 					SDL_Color c = pal->colors[index];
-					Uint32 a = (hasColorkey && index == colorkey) ? 0x00 : 0xFF;
-					fullBuffer[y * newW + x] = c.r | (c.g << 8) | (c.b << 16) | (a << 24);
+					Uint16 a4 = (hasColorkey && index == colorkey) ? 0 : 0xF;
+					Uint16 r4 = c.r >> 4;
+					Uint16 g4 = c.g >> 4;
+					Uint16 b4 = c.b >> 4;
+					fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
 				}
 			}
 		}
@@ -216,13 +222,10 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				for (int x = 0; x < newW; ++x) {
 					int srcX = (x * src->w) / newW;
 					Uint16 px = srcRow[srcX];
-					Uint32 r = (px >> 11) & 0x1F;
-					Uint32 g = (px >> 5) & 0x3F;
-					Uint32 b = px & 0x1F;
-					r = (r << 3) | (r >> 2);
-					g = (g << 2) | (g >> 4);
-					b = (b << 3) | (b >> 2);
-					fullBuffer[y * newW + x] = r | (g << 8) | (b << 16) | 0xFF000000;
+					Uint16 r4 = (px >> 12) & 0xF;
+					Uint16 g4 = (px >> 7) & 0xF;
+					Uint16 b4 = (px >> 1) & 0xF;
+					fullBuffer[y * newW + x] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
 				}
 			}
 		} else {
@@ -230,13 +233,10 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				Uint16* srcRow = (Uint16*)((Uint8*)src->pixels + y * src->pitch);
 				for (int x = 0; x < src->w; ++x) {
 					Uint16 px = srcRow[x];
-					Uint32 r = (px >> 11) & 0x1F;
-					Uint32 g = (px >> 5) & 0x3F;
-					Uint32 b = px & 0x1F;
-					r = (r << 3) | (r >> 2);
-					g = (g << 2) | (g >> 4);
-					b = (b << 3) | (b >> 2);
-					fullBuffer[y * newW + x] = r | (g << 8) | (b << 16) | 0xFF000000;
+					Uint16 r4 = (px >> 12) & 0xF;
+					Uint16 g4 = (px >> 7) & 0xF;
+					Uint16 b4 = (px >> 1) & 0xF;
+					fullBuffer[y * newW + x] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
 				}
 			}
 		}
@@ -251,9 +251,14 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 					int srcX = (x * src->w) / newW;
 					Uint32 px = srcRow[srcX];
 					if (hasColorkey && px == colorkey) {
-						px = 0;
+						fullBuffer[y * newW + x] = 0;
+					} else {
+						Uint16 a4 = (px >> 28) & 0xF;
+						Uint16 r4 = (px >> 20) & 0xF;
+						Uint16 g4 = (px >> 12) & 0xF;
+						Uint16 b4 = (px >> 4) & 0xF;
+						fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
 					}
-					fullBuffer[y * newW + x] = px;
 				}
 			}
 		} else {
@@ -262,9 +267,14 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 				for (int x = 0; x < src->w; ++x) {
 					Uint32 px = srcRow[x];
 					if (hasColorkey && px == colorkey) {
-						px = 0;
+						fullBuffer[y * newW + x] = 0;
+					} else {
+						Uint16 a4 = (px >> 28) & 0xF;
+						Uint16 r4 = (px >> 20) & 0xF;
+						Uint16 g4 = (px >> 12) & 0xF;
+						Uint16 b4 = (px >> 4) & 0xF;
+						fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
 					}
-					fullBuffer[y * newW + x] = px;
 				}
 			}
 		}

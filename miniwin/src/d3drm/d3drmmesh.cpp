@@ -1,6 +1,7 @@
 #include "d3drmmesh_impl.h"
 #include "miniwin.h"
 
+#include <cmath>
 #include <limits>
 
 HRESULT Direct3DRMMeshImpl::QueryInterface(const GUID& riid, void** ppvObject)
@@ -308,6 +309,20 @@ void Direct3DRMMeshImpl::UpdateBox()
 			m_box.max.y = std::max(m_box.max.y, v.position.y);
 			m_box.max.z = std::max(m_box.max.z, v.position.z);
 		}
+	}
+
+	if (m_box.min.x <= m_box.max.x && m_box.min.y <= m_box.max.y && m_box.min.z <= m_box.max.z) {
+		m_sphereCenter.x = (m_box.min.x + m_box.max.x) * 0.5f;
+		m_sphereCenter.y = (m_box.min.y + m_box.max.y) * 0.5f;
+		m_sphereCenter.z = (m_box.min.z + m_box.max.z) * 0.5f;
+		float dx = m_box.max.x - m_sphereCenter.x;
+		float dy = m_box.max.y - m_sphereCenter.y;
+		float dz = m_box.max.z - m_sphereCenter.z;
+		m_sphereRadius = sqrtf(dx * dx + dy * dy + dz * dz);
+	}
+	else {
+		m_sphereCenter = {0.0f, 0.0f, 0.0f};
+		m_sphereRadius = 0.0f;
 	}
 }
 

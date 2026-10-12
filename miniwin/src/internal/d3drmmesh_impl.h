@@ -12,6 +12,8 @@ struct MeshGroup {
 	D3DRMRENDERQUALITY quality = D3DRMRENDER_GOURAUD;
 	int vertexPerFace = 3;
 	int version = 0;
+	mutable Uint32 rendererMeshId = 0xFFFFFFFF;
+	mutable int rendererVersion = -1;
 	std::vector<D3DRMVERTEX> vertices;
 	std::vector<DWORD> indices;
 
@@ -19,7 +21,8 @@ struct MeshGroup {
 
 	MeshGroup(const MeshGroup& other)
 		: color(other.color), texture(other.texture), material(other.material), quality(other.quality),
-		  vertexPerFace(other.vertexPerFace), vertices(std::move(other.vertices)), indices(std::move(other.indices))
+		  vertexPerFace(other.vertexPerFace), rendererMeshId(other.rendererMeshId),
+		  rendererVersion(other.rendererVersion), vertices(std::move(other.vertices)), indices(std::move(other.indices))
 	{
 		if (texture) {
 			texture->AddRef();
@@ -32,10 +35,13 @@ struct MeshGroup {
 	// Move constructor
 	MeshGroup(MeshGroup&& other) noexcept
 		: color(other.color), texture(other.texture), material(other.material), quality(other.quality),
-		  vertexPerFace(other.vertexPerFace), vertices(other.vertices), indices(other.indices)
+		  vertexPerFace(other.vertexPerFace), rendererMeshId(other.rendererMeshId),
+		  rendererVersion(other.rendererVersion), vertices(other.vertices), indices(other.indices)
 	{
 		other.texture = nullptr;
 		other.material = nullptr;
+		other.rendererMeshId = 0xFFFFFFFF;
+		other.rendererVersion = -1;
 	}
 
 	// Move assignment
@@ -46,10 +52,14 @@ struct MeshGroup {
 		material = other.material;
 		quality = other.quality;
 		vertexPerFace = other.vertexPerFace;
+		rendererMeshId = other.rendererMeshId;
+		rendererVersion = other.rendererVersion;
 		vertices = std::move(other.vertices);
 		indices = std::move(other.indices);
 		other.texture = nullptr;
 		other.material = nullptr;
+		other.rendererMeshId = 0xFFFFFFFF;
+		other.rendererVersion = -1;
 		return *this;
 	}
 
@@ -98,10 +108,14 @@ struct Direct3DRMMeshImpl : public Direct3DRMObjectBaseImpl<IDirect3DRMMesh> {
 	HRESULT SetVertices(D3DRMGROUPINDEX groupIndex, int offset, int count, D3DRMVERTEX* vertices) override;
 	HRESULT GetVertices(D3DRMGROUPINDEX groupIndex, int startIndex, int count, D3DRMVERTEX* vertices) override;
 	HRESULT GetBox(D3DRMBOX* box) override;
+	const D3DVECTOR& GetSphereCenter() const { return m_sphereCenter; }
+	float GetSphereRadius() const { return m_sphereRadius; }
 
 private:
 	void UpdateBox();
 
 	std::vector<MeshGroup> m_groups;
 	D3DRMBOX m_box;
+	D3DVECTOR m_sphereCenter = {0.0f, 0.0f, 0.0f};
+	float m_sphereRadius = 0.0f;
 };

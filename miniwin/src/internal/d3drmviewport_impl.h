@@ -49,7 +49,7 @@ struct Direct3DRMViewportImpl : public Direct3DRMObjectBaseImpl<IDirect3DRMViewp
 private:
 	HRESULT RenderScene();
 	void CollectLightsFromFrame(IDirect3DRMFrame* frame, D3DRMMATRIX4D parentMatrix, std::vector<SceneLight>& lights);
-	void CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3DRMMATRIX4D parentMatrix);
+	void CollectMeshesFromFrame(IDirect3DRMFrame* frame, const D3DRMMATRIX4D parentMatrix, bool parentIsIdentity = false);
 	void BuildViewFrustumPlanes();
 	Direct3DRMRenderer* m_renderer;
 	std::vector<DeferredDrawCommand> m_deferredDraws;

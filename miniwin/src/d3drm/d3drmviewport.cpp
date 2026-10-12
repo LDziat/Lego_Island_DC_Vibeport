@@ -31,7 +31,7 @@ Direct3DRMViewportImpl::~Direct3DRMViewportImpl()
 
 static inline void D3DRMMatrixMultiply(D3DRMMATRIX4D out, const D3DRMMATRIX4D a, const D3DRMMATRIX4D b)
 {
-	MultiplyMatrix(out, a, b);
+	MultiplyMatrixAffine(out, a, b);
 }
 
 static void D3DRMMatrixInvertOrthogonal(D3DRMMATRIX4D out, const D3DRMMATRIX4D m)
@@ -59,9 +59,11 @@ static void ComputeFrameWorldMatrix(IDirect3DRMFrame* frame, D3DRMMATRIX4D out)
 	IDirect3DRMFrame* cur = frame;
 	while (cur) {
 		auto* impl = static_cast<Direct3DRMFrameImpl*>(cur);
-		D3DRMMATRIX4D tmp;
-		D3DRMMatrixMultiply(tmp, impl->m_transform, acc);
-		memcpy(acc, tmp, sizeof(acc));
+		if (!impl->m_isIdentity) {
+			D3DRMMATRIX4D tmp;
+			MultiplyMatrixAffine(tmp, impl->m_transform, acc);
+			memcpy(acc, tmp, sizeof(acc));
+		}
 
 		if (cur == impl->m_parent) {
 			break;
@@ -83,7 +85,11 @@ void Direct3DRMViewportImpl::CollectLightsFromFrame(
 
 	auto* frameImpl = static_cast<Direct3DRMFrameImpl*>(frame);
 	D3DRMMATRIX4D worldMatrix;
-	D3DRMMatrixMultiply(worldMatrix, parentToWorld, frameImpl->m_transform);
+	if (frameImpl->m_isIdentity) {
+		memcpy(worldMatrix, parentToWorld, sizeof(D3DRMMATRIX4D));
+	} else {
+		MultiplyMatrixAffine(worldMatrix, parentToWorld, frameImpl->m_transform);
+	}
 
 	if (frameImpl->m_lights) {
 		const auto& lightItems = frameImpl->m_lights->GetItems();
@@ -160,6 +166,32 @@ void Direct3DRMViewportImpl::BuildViewFrustumPlanes()
 
 bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMatrix, const Plane* frustumPlanes)
 {
+	float r = mesh->GetSphereRadius();
+	if (r > 0.0f) {
+		D3DVECTOR viewCenter = TransformPoint(mesh->GetSphereCenter(), worldViewMatrix);
+		float nearZ = -frustumPlanes[4].d;
+		float farZ = frustumPlanes[5].d;
+
+		// 1. Fast Near and Far plane test on bounding sphere
+		if (viewCenter.z + r < nearZ || viewCenter.z - r > farZ) {
+			return false;
+		}
+
+		// 2. Fast side planes (0..3) test on bounding sphere
+		for (int i = 0; i < 4; ++i) {
+			const Plane& plane = frustumPlanes[i];
+			float dist = plane.normal.x * viewCenter.x + plane.normal.y * viewCenter.y + plane.normal.z * viewCenter.z;
+			if (dist < -r) {
+				return false;
+			}
+		}
+
+#ifdef __DREAMCAST__
+		// Conservative sphere culling: guaranteed visible without transforming 8 box corners
+		return true;
+#endif
+	}
+
 	D3DRMBOX box;
 	mesh->GetBox(&box);
 
@@ -230,18 +262,35 @@ inline D3DRMVECTOR4D TransformPoint4(const D3DRMVECTOR4D& p, const D3DRMMATRIX4D
 	};
 }
 
-void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3DRMMATRIX4D parentMatrix)
+void Direct3DRMViewportImpl::CollectMeshesFromFrame(
+	IDirect3DRMFrame* frame,
+	const D3DRMMATRIX4D parentMatrix,
+	bool parentIsIdentity
+)
 {
 	Direct3DRMFrameImpl* frameImpl = static_cast<Direct3DRMFrameImpl*>(frame);
-	D3DRMMATRIX4D localMatrix;
-	memcpy(localMatrix, frameImpl->m_transform, sizeof(D3DRMMATRIX4D));
-
 	D3DRMMATRIX4D worldMatrix;
-	MultiplyMatrix(worldMatrix, parentMatrix, localMatrix);
+	bool worldIsIdentity = false;
+
+	if (parentIsIdentity) {
+		memcpy(worldMatrix, frameImpl->m_transform, sizeof(D3DRMMATRIX4D));
+		worldIsIdentity = frameImpl->m_isIdentity;
+	}
+	else if (frameImpl->m_isIdentity) {
+		memcpy(worldMatrix, parentMatrix, sizeof(D3DRMMATRIX4D));
+		worldIsIdentity = false;
+	}
+	else {
+		MultiplyMatrixAffine(worldMatrix, parentMatrix, frameImpl->m_transform);
+		worldIsIdentity = false;
+	}
 
 	if (!frameImpl->m_visuals) {
 		return;
 	}
+
+	bool hasModelView = false;
+	D3DRMMATRIX4D modelViewMatrix;
 
 	const auto& visualItems = frameImpl->m_visuals->GetItems();
 	for (auto* visual : visualItems) {
@@ -251,15 +300,17 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(IDirect3DRMFrame* frame, D3D
 
 		IDirect3DRMFrame* childFrame = visual->AsFrame();
 		if (childFrame) {
-			CollectMeshesFromFrame(childFrame, worldMatrix);
+			CollectMeshesFromFrame(childFrame, worldMatrix, worldIsIdentity);
 			continue;
 		}
 
 		IDirect3DRMMesh* meshInterface = visual->AsMesh();
 		if (meshInterface) {
 			Direct3DRMMeshImpl* mesh = static_cast<Direct3DRMMeshImpl*>(meshInterface);
-			D3DRMMATRIX4D modelViewMatrix;
-			MultiplyMatrix(modelViewMatrix, worldMatrix, m_viewMatrix);
+			if (!hasModelView) {
+				MultiplyMatrixAffine(modelViewMatrix, worldMatrix, m_viewMatrix);
+				hasModelView = true;
+			}
 
 			// Tiered distance culling
 			D3DRMBOX box;
@@ -364,7 +415,7 @@ HRESULT Direct3DRMViewportImpl::RenderScene()
 	BuildViewFrustumPlanes();
 	m_renderer->SetFrustumPlanes(m_frustumPlanes);
 
-	CollectMeshesFromFrame(m_rootFrame, identity);
+	CollectMeshesFromFrame(m_rootFrame, identity, true);
 
 	if (!m_deferredDraws.empty()) {
 		std::sort(

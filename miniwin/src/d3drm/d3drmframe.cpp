@@ -3,6 +3,7 @@
 #include "d3drmlight_impl.h"
 #include "d3drmtexture_impl.h"
 #include "d3drmvisual_impl.h"
+#include "mathutils.h"
 #include "miniwin.h"
 
 #include <SDL/SDL.h>
@@ -101,6 +102,7 @@ HRESULT Direct3DRMFrameImpl::AddTransform(D3DRMCOMBINETYPE combine, D3DRMMATRIX4
 	switch (combine) {
 	case D3DRMCOMBINETYPE::REPLACE:
 		std::memcpy(m_transform, matrix, sizeof(m_transform));
+		m_isIdentity = IsIdentityMatrix(m_transform);
 		return DD_OK;
 	default:
 		MINIWIN_NOT_IMPLEMENTED();

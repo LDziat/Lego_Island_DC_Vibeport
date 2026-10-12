@@ -136,6 +136,7 @@ void OpenGL1Renderer::AddTextureDestroyCallback(Uint32 id, IDirect3DRMTexture* t
 			auto* ctx = static_cast<TextureDestroyContextGL*>(arg);
 			auto& cache = ctx->renderer->m_textures[ctx->textureId];
 			if (cache.texture) {
+				static_cast<Direct3DRMTextureImpl*>(cache.texture)->rendererTextureId = 0xFFFFFFFF;
 				ctx->renderer->m_textureToId.erase(cache.texture);
 			}
 			if (cache.glTextureId != 0) {
@@ -329,6 +330,11 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, float scaleX, float scaleY)
 {
 	auto texture = static_cast<Direct3DRMTextureImpl*>(iTexture);
+
+	if (texture->rendererTextureId != 0xFFFFFFFF && texture->rendererVersion == texture->m_version) {
+		return texture->rendererTextureId;
+	}
+
 	auto surface = static_cast<DirectDrawSurfaceImpl*>(texture->m_surface);
 
 	int newW = m_useNPOT ? surface->m_surface->w : NextPowerOfTwo(surface->m_surface->w);
@@ -366,6 +372,8 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 			tex.uScale = finalUScale;
 			tex.vScale = finalVScale;
 		}
+		texture->rendererTextureId = id;
+		texture->rendererVersion = texture->m_version;
 		return id;
 	}
 
@@ -382,6 +390,8 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 			tex.uScale = finalUScale;
 			tex.vScale = finalVScale;
 			m_textureToId[iTexture] = i;
+			texture->rendererTextureId = i;
+			texture->rendererVersion = texture->m_version;
 			AddTextureDestroyCallback(i, texture);
 			return i;
 		}
@@ -398,6 +408,8 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 		 static_cast<float>(finalVScale)}
 	);
 	m_textureToId[iTexture] = newId;
+	texture->rendererTextureId = newId;
+	texture->rendererVersion = texture->m_version;
 	AddTextureDestroyCallback(newId, texture);
 	return newId;
 }
@@ -452,6 +464,7 @@ void OpenGL1Renderer::AddMeshDestroyCallback(Uint32 id, IDirect3DRMMesh* mesh)
 			auto* ctx = static_cast<GLMeshDestroyContext*>(arg);
 			auto& cache = ctx->renderer->m_meshs[ctx->id];
 			if (cache.meshGroup) {
+				cache.meshGroup->rendererMeshId = 0xFFFFFFFF;
 				ctx->renderer->m_meshGroupToId.erase(cache.meshGroup);
 			}
 			cache.meshGroup = nullptr;
@@ -464,6 +477,10 @@ void OpenGL1Renderer::AddMeshDestroyCallback(Uint32 id, IDirect3DRMMesh* mesh)
 
 Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGroup)
 {
+	if (meshGroup->rendererMeshId != 0xFFFFFFFF && meshGroup->rendererVersion == meshGroup->version) {
+		return meshGroup->rendererMeshId;
+	}
+
 	auto it = m_meshGroupToId.find(meshGroup);
 	if (it != m_meshGroupToId.end()) {
 		Uint32 id = it->second;
@@ -471,6 +488,8 @@ Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGr
 		if (cache.version != meshGroup->version) {
 			cache = std::move(GLUploadMesh(*meshGroup, m_useVBOs));
 		}
+		meshGroup->rendererMeshId = id;
+		meshGroup->rendererVersion = meshGroup->version;
 		return id;
 	}
 
@@ -481,6 +500,8 @@ Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGr
 		if (!cache.meshGroup) {
 			cache = std::move(newCache);
 			m_meshGroupToId[meshGroup] = i;
+			meshGroup->rendererMeshId = i;
+			meshGroup->rendererVersion = meshGroup->version;
 			AddMeshDestroyCallback(i, mesh);
 			return i;
 		}
@@ -489,6 +510,8 @@ Uint32 OpenGL1Renderer::GetMeshId(IDirect3DRMMesh* mesh, const MeshGroup* meshGr
 	Uint32 newId = (Uint32) m_meshs.size();
 	m_meshs.push_back(std::move(newCache));
 	m_meshGroupToId[meshGroup] = newId;
+	meshGroup->rendererMeshId = newId;
+	meshGroup->rendererVersion = meshGroup->version;
 	AddMeshDestroyCallback(newId, mesh);
 	return newId;
 }

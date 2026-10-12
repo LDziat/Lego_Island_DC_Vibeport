@@ -12,4 +12,6 @@ struct Direct3DRMTextureImpl : public Direct3DRMObjectBaseImpl<IDirect3DRMTextur
 	IDirectDrawSurface* m_surface = nullptr;
 	Uint8 m_version = 0;
 	bool m_holdsRef;
+	mutable Uint32 rendererTextureId = 0xFFFFFFFF;
+	mutable Uint8 rendererVersion = 0xFF;
 };

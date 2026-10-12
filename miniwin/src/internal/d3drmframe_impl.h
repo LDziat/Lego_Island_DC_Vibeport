@@ -32,6 +32,7 @@ struct Direct3DRMFrameImpl : public Direct3DRMObjectBaseImpl<IDirect3DRMFrame2> 
 	Direct3DRMFrameImpl* m_parent{};
 	D3DRMMATRIX4D m_transform =
 		{{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 0.f}, {0.f, 0.f, 1.f, 0.f}, {0.f, 0.f, 0.f, 1.f}};
+	bool m_isIdentity = true;
 
 private:
 	Direct3DRMFrameArrayImpl* m_children{};

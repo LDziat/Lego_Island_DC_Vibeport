@@ -56,3 +56,29 @@ inline void MultiplyMatrix(D3DRMMATRIX4D out, const D3DRMMATRIX4D a, const D3DRM
 	}
 	memcpy(out, res, sizeof(D3DRMMATRIX4D));
 }
+
+inline void MultiplyMatrixAffine(D3DRMMATRIX4D out, const D3DRMMATRIX4D a, const D3DRMMATRIX4D b)
+{
+	D3DRMMATRIX4D res;
+	for (int i = 0; i < 3; ++i) {
+		float a0 = a[i][0], a1 = a[i][1], a2 = a[i][2];
+		res[i][0] = a0 * b[0][0] + a1 * b[1][0] + a2 * b[2][0];
+		res[i][1] = a0 * b[0][1] + a1 * b[1][1] + a2 * b[2][1];
+		res[i][2] = a0 * b[0][2] + a1 * b[1][2] + a2 * b[2][2];
+		res[i][3] = 0.0f;
+	}
+	float t0 = a[3][0], t1 = a[3][1], t2 = a[3][2];
+	res[3][0] = t0 * b[0][0] + t1 * b[1][0] + t2 * b[2][0] + b[3][0];
+	res[3][1] = t0 * b[0][1] + t1 * b[1][1] + t2 * b[2][1] + b[3][1];
+	res[3][2] = t0 * b[0][2] + t1 * b[1][2] + t2 * b[2][2] + b[3][2];
+	res[3][3] = 1.0f;
+	memcpy(out, res, sizeof(D3DRMMATRIX4D));
+}
+
+inline bool IsIdentityMatrix(const D3DRMMATRIX4D m)
+{
+	return m[0][0] == 1.f && m[0][1] == 0.f && m[0][2] == 0.f && m[0][3] == 0.f &&
+	       m[1][0] == 0.f && m[1][1] == 1.f && m[1][2] == 0.f && m[1][3] == 0.f &&
+	       m[2][0] == 0.f && m[2][1] == 0.f && m[2][2] == 1.f && m[2][3] == 0.f &&
+	       m[3][0] == 0.f && m[3][1] == 0.f && m[3][2] == 0.f && m[3][3] == 1.f;
+}

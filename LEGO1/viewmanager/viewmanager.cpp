@@ -3,6 +3,7 @@
 #include "mxdirectx/mxstopwatch.h"
 #include "tgl/d3drm/impl.h"
 #include "viewlod.h"
+#include "dcprof.h"
 
 #include <vec.h>
 
@@ -306,6 +307,7 @@ inline void ViewManager::ManageVisibilityAndDetailRecursively(ViewROI* p_from, i
 // FUNCTION: LEGO1 0x100a6930
 void ViewManager::Update(float p_previousRenderTime, float)
 {
+	DC_ZONE(Z_VIEWMGR);
 	MxStopWatch stopWatch;
 	stopWatch.Start();
 

@@ -35,6 +35,7 @@
 #include "roi/legoroi.h"
 #include "tgl/d3drm/impl.h"
 #include "viewmanager/viewmanager.h"
+#include "dcprof.h"
 
 #include <array>
 #include <extensions/multiplayer.h>
@@ -357,6 +358,7 @@ MxS32 IsleApp::SetupLegoOmni()
 	if (!failure) {
 		VariableTable()->SetVariable("ACTOR_01", "");
 		TickleManager()->SetClientTickleInterval(VideoManager(), 10);
+		DcProfInit();
 		result = TRUE;
 	}
 
@@ -1568,8 +1570,10 @@ inline bool IsleApp::Tick()
 	}
 
 	if (!Lego()->IsPaused()) {
+		DC_ZONE(Z_TICK);
 		TickleManager()->Tickle();
 	}
+	DcProfFrameEnd();
 	g_lastFrameTime = currentTime;
 
 	if (g_startupDelay == 0) {

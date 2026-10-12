@@ -5,6 +5,7 @@ extern "C" void MW_DrawLoadingBug();
 #include "ddsurface_impl.h"
 #include "mathutils.h"
 #include "meshutils.h"
+#include "dcprof.h"
 
 #include <SDL/SDL.h>
 #include <algorithm>
@@ -159,8 +160,10 @@ static int NextPowerOfTwo(int v)
 	return power;
 }
 
-static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float scaleX, float scaleY)
+static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float scaleX, float scaleY, GLuint existingTexId = 0)
 {
+	DC_ZONE(Z_TEXUPLOAD);
+	DC_COUNT(C_TEX_UPLOADS, 1);
 #ifdef __DREAMCAST__
 	int newW = useNPOT ? src->w : NextPowerOfTwo(src->w);
 	int newH = useNPOT ? src->h : NextPowerOfTwo(src->h);
@@ -168,7 +171,8 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 	bool scaleUI = false;
 	bool scale3D = false;
 	
-	if (isUI && (newW > 512 || newH > 512)) { newW = 512; newH = 512; scaleUI = true; } if (!isUI && newW > 64) {
+	if (isUI && (newW > 512 || newH > 512)) { newW = 512; newH = 512; scaleUI = true; }
+	if (!isUI && newW > 64) {
 		newW = 64;
 		newH = 64;
 		scale3D = true;
@@ -176,67 +180,89 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 
 	if (newW < 8) newW = 8;
 	if (newH < 8) newH = 8;
+
+	DC_COUNT(C_TEX_PIXELS, newW * newH);
 	
 	std::vector<Uint16> fullBuffer;
 	fullBuffer.resize(newW * newH);
+
+	std::vector<int> xmap;
+	std::vector<int> ymap;
+	if (scaleUI || scale3D) {
+		xmap.resize(newW);
+		for (int x = 0; x < newW; ++x) {
+			xmap[x] = (x * src->w) / newW;
+		}
+		ymap.resize(newH);
+		for (int y = 0; y < newH; ++y) {
+			ymap[y] = (y * src->h) / newH;
+		}
+	}
 	
 	SDL_Palette* pal = src->format->palette;
 	
 	if (src->format->BitsPerPixel == 8 && pal) {
 		bool hasColorkey = (src->flags & SDL_SRCCOLORKEY) != 0;
 		Uint32 colorkey = hasColorkey ? src->format->colorkey : 0xFFFFFFFF;
+
+		// Precompute 256-entry ARGB4444 palette table
+		Uint16 palLut[256];
+		int ncolors = pal->ncolors < 256 ? pal->ncolors : 256;
+		for (int i = 0; i < ncolors; ++i) {
+			if (hasColorkey && (Uint32)i == colorkey) {
+				palLut[i] = 0;
+			} else {
+				SDL_Color c = pal->colors[i];
+				Uint16 r4 = c.r >> 4;
+				Uint16 g4 = c.g >> 4;
+				Uint16 b4 = c.b >> 4;
+				palLut[i] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
+			}
+		}
+		for (int i = ncolors; i < 256; ++i) {
+			palLut[i] = 0;
+		}
+
 		if (scaleUI || scale3D) {
 			for (int y = 0; y < newH; ++y) {
-				int srcY = (y * src->h) / newH;
-				Uint8* srcRow = (Uint8*)src->pixels + srcY * src->pitch;
+				const Uint8* srcRow = (const Uint8*)src->pixels + ymap[y] * src->pitch;
+				Uint16* dstRow = &fullBuffer[y * newW];
 				for (int x = 0; x < newW; ++x) {
-					int srcX = (x * src->w) / newW;
-					Uint8 index = srcRow[srcX];
-					SDL_Color c = pal->colors[index];
-					Uint16 a4 = (hasColorkey && index == colorkey) ? 0 : 0xF;
-					Uint16 r4 = c.r >> 4;
-					Uint16 g4 = c.g >> 4;
-					Uint16 b4 = c.b >> 4;
-					fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
+					dstRow[x] = palLut[srcRow[xmap[x]]];
 				}
 			}
 		} else {
 			for (int y = 0; y < src->h; ++y) {
-				Uint8* srcRow = (Uint8*)src->pixels + y * src->pitch;
+				const Uint8* srcRow = (const Uint8*)src->pixels + y * src->pitch;
+				Uint16* dstRow = &fullBuffer[y * newW];
 				for (int x = 0; x < src->w; ++x) {
-					Uint8 index = srcRow[x];
-					SDL_Color c = pal->colors[index];
-					Uint16 a4 = (hasColorkey && index == colorkey) ? 0 : 0xF;
-					Uint16 r4 = c.r >> 4;
-					Uint16 g4 = c.g >> 4;
-					Uint16 b4 = c.b >> 4;
-					fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
+					dstRow[x] = palLut[srcRow[x]];
 				}
 			}
 		}
 	} else if (src->format->BitsPerPixel == 16) {
 		if (scaleUI || scale3D) {
 			for (int y = 0; y < newH; ++y) {
-				int srcY = (y * src->h) / newH;
-				Uint16* srcRow = (Uint16*)((Uint8*)src->pixels + srcY * src->pitch);
+				const Uint16* srcRow = (const Uint16*)((const Uint8*)src->pixels + ymap[y] * src->pitch);
+				Uint16* dstRow = &fullBuffer[y * newW];
 				for (int x = 0; x < newW; ++x) {
-					int srcX = (x * src->w) / newW;
-					Uint16 px = srcRow[srcX];
+					Uint16 px = srcRow[xmap[x]];
 					Uint16 r4 = (px >> 12) & 0xF;
 					Uint16 g4 = (px >> 7) & 0xF;
 					Uint16 b4 = (px >> 1) & 0xF;
-					fullBuffer[y * newW + x] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
+					dstRow[x] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
 				}
 			}
 		} else {
 			for (int y = 0; y < src->h; ++y) {
-				Uint16* srcRow = (Uint16*)((Uint8*)src->pixels + y * src->pitch);
+				const Uint16* srcRow = (const Uint16*)((const Uint8*)src->pixels + y * src->pitch);
+				Uint16* dstRow = &fullBuffer[y * newW];
 				for (int x = 0; x < src->w; ++x) {
 					Uint16 px = srcRow[x];
 					Uint16 r4 = (px >> 12) & 0xF;
 					Uint16 g4 = (px >> 7) & 0xF;
 					Uint16 b4 = (px >> 1) & 0xF;
-					fullBuffer[y * newW + x] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
+					dstRow[x] = (0xF << 12) | (r4 << 8) | (g4 << 4) | b4;
 				}
 			}
 		}
@@ -245,35 +271,35 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 		Uint32 colorkey = hasColorkey ? src->format->colorkey : 0;
 		if (scaleUI || scale3D) {
 			for (int y = 0; y < newH; ++y) {
-				int srcY = (y * src->h) / newH;
-				Uint32* srcRow = (Uint32*)((Uint8*)src->pixels + srcY * src->pitch);
+				const Uint32* srcRow = (const Uint32*)((const Uint8*)src->pixels + ymap[y] * src->pitch);
+				Uint16* dstRow = &fullBuffer[y * newW];
 				for (int x = 0; x < newW; ++x) {
-					int srcX = (x * src->w) / newW;
-					Uint32 px = srcRow[srcX];
+					Uint32 px = srcRow[xmap[x]];
 					if (hasColorkey && px == colorkey) {
-						fullBuffer[y * newW + x] = 0;
+						dstRow[x] = 0;
 					} else {
 						Uint16 a4 = (px >> 28) & 0xF;
 						Uint16 r4 = (px >> 20) & 0xF;
 						Uint16 g4 = (px >> 12) & 0xF;
 						Uint16 b4 = (px >> 4) & 0xF;
-						fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
+						dstRow[x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
 					}
 				}
 			}
 		} else {
 			for (int y = 0; y < src->h; ++y) {
-				Uint32* srcRow = (Uint32*)((Uint8*)src->pixels + y * src->pitch);
+				const Uint32* srcRow = (const Uint32*)((const Uint8*)src->pixels + y * src->pitch);
+				Uint16* dstRow = &fullBuffer[y * newW];
 				for (int x = 0; x < src->w; ++x) {
 					Uint32 px = srcRow[x];
 					if (hasColorkey && px == colorkey) {
-						fullBuffer[y * newW + x] = 0;
+						dstRow[x] = 0;
 					} else {
 						Uint16 a4 = (px >> 28) & 0xF;
 						Uint16 r4 = (px >> 20) & 0xF;
 						Uint16 g4 = (px >> 12) & 0xF;
 						Uint16 b4 = (px >> 4) & 0xF;
-						fullBuffer[y * newW + x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
+						dstRow[x] = (a4 << 12) | (r4 << 8) | (g4 << 4) | b4;
 					}
 				}
 			}
@@ -281,7 +307,7 @@ static Uint32 UploadTextureData(SDL_Surface* src, bool useNPOT, bool isUI, float
 	}
 	
 	// Create the texture in GLdc
-	Uint32 texId = GL11_UploadTextureData(fullBuffer.data(), newW, newH, isUI, scaleX, scaleY);
+	Uint32 texId = GL11_UploadTextureData(fullBuffer.data(), newW, newH, isUI, scaleX, scaleY, existingTexId);
 	return texId;
 #else
 	SDL_Surface* working = src;
@@ -374,8 +400,17 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 		Uint32 id = it->second;
 		auto& tex = m_textures[id];
 		if (tex.version != texture->m_version) {
+#ifdef __DREAMCAST__
+			if (tex.width == newW && tex.height == newH && tex.glTextureId != 0) {
+				tex.glTextureId = UploadTextureData(surface->m_surface, m_useNPOT, isUI, scaleX, scaleY, tex.glTextureId);
+			} else {
+				GL11_DestroyTexture(tex.glTextureId);
+				tex.glTextureId = UploadTextureData(surface->m_surface, m_useNPOT, isUI, scaleX, scaleY);
+			}
+#else
 			GL11_DestroyTexture(tex.glTextureId);
 			tex.glTextureId = UploadTextureData(surface->m_surface, m_useNPOT, isUI, scaleX, scaleY);
+#endif
 			tex.version = texture->m_version;
 			tex.width = newW;
 			tex.height = newH;
@@ -426,6 +461,8 @@ Uint32 OpenGL1Renderer::GetTextureId(IDirect3DRMTexture* iTexture, bool isUI, fl
 
 GLMeshCacheEntry GLUploadMesh(const MeshGroup& meshGroup, bool useVBOs)
 {
+	DC_ZONE(Z_MESHUPLOAD);
+	DC_COUNT(C_MESH_UPLOADS, 1);
 	GLMeshCacheEntry cache;
 	cache.meshGroup = &meshGroup;
 	cache.version = meshGroup.version;
@@ -560,6 +597,7 @@ void OpenGL1Renderer::SubmitDraw(
 	const Appearance& appearance
 )
 {
+	DC_ZONE(Z_GLSUBMIT);
 	auto& mesh = m_meshs[meshId];
 
 	if (mesh.flat) {
@@ -577,10 +615,13 @@ void OpenGL1Renderer::SubmitDraw(
 
 #ifdef __DREAMCAST__
 	if (m_frameVerticesSubmitted + mesh.indices.size() > 24000) {
+		DC_COUNT(C_INDICES_DROPPED, mesh.indices.size());
 		return;
 	}
 	m_frameVerticesSubmitted += mesh.indices.size();
 #endif
+	DC_COUNT(C_DRAWS, 1);
+	DC_COUNT(C_INDICES, mesh.indices.size());
 
 	// Bind texture if present
 	if (appearance.textureId != NO_TEXTURE_ID) {
@@ -623,7 +664,10 @@ void OpenGL1Renderer::Flip()
 {
 	SDL_GL_MakeCurrent(DDWindow, m_context);
 	if (m_dirty) {
-		SDL_GL_SwapWindow(DDWindow);
+		{
+			DC_ZONE(Z_SWAP);
+			SDL_GL_SwapWindow(DDWindow);
+		}
 		m_dirty = false;
 	}
 }

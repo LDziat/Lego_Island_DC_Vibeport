@@ -8,6 +8,7 @@
 #include "ddraw_impl.h"
 #include "mathutils.h"
 #include "miniwin.h"
+#include "dcprof.h"
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_stdinc.h>
@@ -272,6 +273,7 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 	bool parentIsIdentity
 )
 {
+	DC_ZONE(Z_COLLECT);
 	Direct3DRMFrameImpl* frameImpl = static_cast<Direct3DRMFrameImpl*>(frame);
 	D3DRMMATRIX4D worldMatrix;
 	bool worldIsIdentity = false;
@@ -337,23 +339,28 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 #ifdef __DREAMCAST__
 				// Tier 1: Tiny parts / accessories / small bricks (size < 6): cull beyond 40
 				if (sizeSq < (6.0f * 6.0f) && distSq > (40.0f * 40.0f)) {
+					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Tier 2: Small props, flowers, minifig parts (size < 18): cull beyond 70
 				if (sizeSq < (18.0f * 18.0f) && distSq > (70.0f * 70.0f)) {
+					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Tier 3: Medium scenery, trees, streetlamps, vehicles (size < 40): cull beyond 120
 				if (sizeSq < (40.0f * 40.0f) && distSq > (120.0f * 120.0f)) {
+					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Tier 4: Large scenery / buildings (size < 120): cull beyond 220
 				if (sizeSq < (120.0f * 120.0f) && distSq > (220.0f * 220.0f)) {
+					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Island terrain meshes have size > 150-200, so they are never distance-culled!
 #else
 				if (sizeSq < (30.0f * 30.0f) && distSq > (100.0f * 100.0f)) {
+					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 #endif
@@ -371,18 +378,19 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 						meshGroup.quality == D3DRMRENDER_FLAT || meshGroup.quality == D3DRMRENDER_UNLITFLAT
 					};
 
+					DWORD meshId = m_renderer->GetMeshId(mesh, &meshGroup);
 					static const Matrix3x3 dummyNormalMatrix = {};
 					if (appearance.color.unused != 255) {
 						m_deferredDraws.push_back(DeferredDrawCommand());
 						DeferredDrawCommand& cmd = m_deferredDraws.back();
-						cmd.meshId = m_renderer->GetMeshId(mesh, &meshGroup);
+						cmd.meshId = meshId;
 						memcpy(cmd.modelViewMatrix, modelViewMatrix, sizeof(D3DRMMATRIX4D));
 						cmd.appearance = appearance;
 						cmd.depth = modelViewMatrix[3][2];
 					}
 					else {
 						m_renderer->SubmitDraw(
-							m_renderer->GetMeshId(mesh, &meshGroup),
+							meshId,
 							modelViewMatrix,
 							worldMatrix,
 							m_viewMatrix,
@@ -391,6 +399,9 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 						);
 					}
 				}
+			}
+			else {
+				DC_COUNT(C_FRUSTUM_CULLED, 1);
 			}
 		}
 	}
@@ -407,9 +418,9 @@ HRESULT Direct3DRMViewportImpl::RenderScene()
 
 	D3DRMMATRIX4D identity = {{1.f, 0.f, 0.f, 0.f}, {0.f, 1.f, 0.f, 0.f}, {0.f, 0.f, 1.f, 0.f}, {0.f, 0.f, 0.f, 1.f}};
 
-	std::vector<SceneLight> lights;
-	CollectLightsFromFrame(m_rootFrame, identity, lights);
-	m_renderer->PushLights(lights.data(), lights.size());
+	m_frameLights.clear();
+	CollectLightsFromFrame(m_rootFrame, identity, m_frameLights);
+	m_renderer->PushLights(m_frameLights.data(), m_frameLights.size());
 	HRESULT status = m_renderer->BeginFrame();
 	if (status != DD_OK) {
 		return status;

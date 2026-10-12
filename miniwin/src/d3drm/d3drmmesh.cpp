@@ -153,9 +153,15 @@ HRESULT Direct3DRMMeshImpl::SetGroupMaterial(D3DRMGROUPINDEX groupIndex, IDirect
 		return DDERR_INVALIDPARAMS;
 	}
 
-	material->AddRef();
-
 	auto& group = m_groups[groupIndex];
+	if (group.material == material) {
+		return DD_OK;
+	}
+
+	if (material) {
+		material->AddRef();
+	}
+
 	if (group.material) {
 		group.material->Release();
 	}
@@ -170,9 +176,15 @@ HRESULT Direct3DRMMeshImpl::SetGroupTexture(D3DRMGROUPINDEX groupIndex, IDirect3
 		return DDERR_INVALIDPARAMS;
 	}
 
-	texture->AddRef();
-
 	auto& group = m_groups[groupIndex];
+	if (group.texture == texture) {
+		return DD_OK;
+	}
+
+	if (texture) {
+		texture->AddRef();
+	}
+
 	if (group.texture) {
 		group.texture->Release();
 	}
@@ -230,6 +242,11 @@ HRESULT Direct3DRMMeshImpl::SetGroupQuality(D3DRMGROUPINDEX groupIndex, D3DRMREN
 		return DDERR_INVALIDPARAMS;
 	}
 
+	auto& group = m_groups[groupIndex];
+	if (group.quality == quality) {
+		return DD_OK;
+	}
+
 	switch (quality) {
 	case D3DRMRENDER_WIREFRAME:
 	case D3DRMRENDER_UNLITFLAT:
@@ -240,7 +257,6 @@ HRESULT Direct3DRMMeshImpl::SetGroupQuality(D3DRMGROUPINDEX groupIndex, D3DRMREN
 		break;
 	}
 
-	auto& group = m_groups[groupIndex];
 	group.quality = quality;
 	group.version++;
 

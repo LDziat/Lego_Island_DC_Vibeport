@@ -51,6 +51,7 @@ private:
 	void BuildViewFrustumPlanes();
 	Direct3DRMRenderer* m_renderer;
 	std::vector<DeferredDrawCommand> m_deferredDraws;
+	std::vector<SceneLight> m_frameLights;
 	D3DCOLOR m_backgroundColor = 0xFF000000;
 	DWORD m_virtualWidth;
 	DWORD m_virtualHeight;

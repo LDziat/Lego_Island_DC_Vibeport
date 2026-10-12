@@ -18,6 +18,7 @@
 #include "roi/legoroi.h"
 #include "tgl/d3drm/impl.h"
 #include "viewmanager/viewroi.h"
+#include "dcprof.h"
 
 #include <SDL/SDL_version.h>
 #if defined(SDL_VERSION_ATLEAST) && SDL_VERSION_ATLEAST(2,0,0)
@@ -330,6 +331,7 @@ void LegoVideoManager::ToggleFPS(MxBool p_visible)
 // STUB: BETA10 0x100d69cc
 MxResult LegoVideoManager::Tickle()
 {
+	DC_ZONE(Z_VIDEO_TICKLE);
 #if !defined(BETA10) && !defined(__DREAMCAST__)
 	if (m_unk0x554 && !m_videoParam.Flags().GetFlipSurfaces() &&
 		TransitionManager()->GetTransitionType() == MxTransitionManager::e_idle) {

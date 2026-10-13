@@ -250,13 +250,20 @@ inline void ViewManager::ManageVisibilityAndDetailRecursively(ViewROI* p_from, i
 
 				// Tiered early distance-squared rejection: eliminates tiny/medium objects
 				// from being projected or evaluated, keeping island terrain (radius > 150) intact.
-				if ((radius < 12.0f && distSq > (90.0f * 90.0f)) ||
-				    (radius < 30.0f && distSq > (160.0f * 160.0f)) ||
-				    (radius < 80.0f && distSq > (240.0f * 240.0f))) {
-					if (p_from->GetLodLevel() != ViewROI::c_lodLevelInvisible) {
-						ManageVisibilityAndDetailRecursively(p_from, ViewROI::c_lodLevelInvisible);
+				// Respects user draw distance scale and is bypassed when Max Quality is active.
+				if (RealtimeView::GetUserMaxLOD() <= 5.0f) {
+					float dScale = g_debugDrawDistanceScale;
+					float d1 = 90.0f * dScale;
+					float d2 = 160.0f * dScale;
+					float d3 = 240.0f * dScale;
+					if ((radius < 12.0f && distSq > (d1 * d1)) ||
+					    (radius < 30.0f && distSq > (d2 * d2)) ||
+					    (radius < 80.0f && distSq > (d3 * d3))) {
+						if (p_from->GetLodLevel() != ViewROI::c_lodLevelInvisible) {
+							ManageVisibilityAndDetailRecursively(p_from, ViewROI::c_lodLevelInvisible);
+						}
+						return;
 					}
-					return;
 				}
 
 				float sphere_projected_area = (radius * radius) * m_inv_view_area_at_one;
@@ -402,6 +409,10 @@ inline int ViewManager::CalculateLODLevel(float p_maximumScale, float p_initialS
 	int lodLevel;
 
 	assert(from);
+
+	if (RealtimeView::GetUserMaxLOD() >= 10.0f) {
+		return g_maxLODLevels - 1;
+	}
 
 	if (GetFirstLODIndex(from) != 0) {
 		if (RealtimeView::GetUserMaxLOD() <= 5.0f && p_maximumScale < g_minLODThreshold) {

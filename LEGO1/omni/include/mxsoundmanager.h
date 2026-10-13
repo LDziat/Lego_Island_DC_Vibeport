@@ -48,6 +48,12 @@ protected:
 		int p_additionalAmount,
 		int p_totalAmount
 	);
+#else
+	static void AudioStreamCallback(
+		void* p_userdata,
+		Uint8* p_stream,
+		int p_len
+	);
 #endif
 
 	MxMiniaudio<ma_engine> m_engine;

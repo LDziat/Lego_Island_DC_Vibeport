@@ -201,6 +201,34 @@ MxResult LegoInputManager::GetNavigationKeyStates(MxU32& p_keyFlags)
 // FUNCTION: LEGO1 0x1005c320
 MxResult LegoInputManager::GetJoystickState(MxU32* p_joystickX, MxU32* p_joystickY, MxU32* p_povPosition)
 {
+#ifdef __DREAMCAST__
+	extern bool g_leftTriggerHeld;
+	extern int g_dreamcastJoyX;
+	extern int g_dreamcastJoyY;
+
+	if (g_leftTriggerHeld) {
+		*p_joystickX = 50;
+		*p_joystickY = 50;
+		*p_povPosition = -1;
+		return SUCCESS;
+	}
+
+	int jx = 50;
+	int jy = 50;
+	if (g_dreamcastJoyX < -20 || g_dreamcastJoyX > 20) {
+		jx = ((g_dreamcastJoyX + 128) * 100) / 255;
+	}
+	if (g_dreamcastJoyY < -20 || g_dreamcastJoyY > 20) {
+		jy = ((g_dreamcastJoyY + 128) * 100) / 255;
+	}
+	if (jx < 0) jx = 0; if (jx > 100) jx = 100;
+	if (jy < 0) jy = 0; if (jy > 100) jy = 100;
+
+	*p_joystickX = (MxU32) jx;
+	*p_joystickY = (MxU32) jy;
+	*p_povPosition = -1;
+	return SUCCESS;
+#else
 	if (!std::holds_alternative<SDL_JoystickID_v>(m_lastInputMethod) &&
 		!(std::holds_alternative<SDL_TouchID_v>(m_lastInputMethod) && m_touchScheme == e_gamepad)) {
 		return FAILURE;
@@ -231,6 +259,7 @@ MxResult LegoInputManager::GetJoystickState(MxU32* p_joystickX, MxU32* p_joystic
 	*p_joystickY = ((yPos + 32768) * 100) / 65535;
 	*p_povPosition = -1;
 	return SUCCESS;
+#endif
 }
 
 // FUNCTION: LEGO1 0x1005c470

@@ -371,7 +371,14 @@ void MxBackgroundAudioManager::Enable(MxBool p_enable)
 		this->m_enabled = p_enable;
 
 		if (!p_enable) {
-			Stop();
+			if (m_activePresenter) {
+				m_activePresenter->SetVolume(0);
+			}
+		}
+		else {
+			if (m_activePresenter) {
+				m_activePresenter->SetVolume(m_targetVolume > 0 ? m_targetVolume : 30);
+			}
 		}
 	}
 }

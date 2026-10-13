@@ -1,4 +1,9 @@
 extern "C" void MW_DrawLoadingBug();
+#ifdef __DREAMCAST__
+extern "C" void DebugMenu_Render(void);
+extern "C" bool DebugMenu_IsOpen(void);
+extern "C" void DebugMenu_RenderFpsOverlay(void);
+#endif
 #include "actual.h"
 #include "d3drmrenderer_opengl1.h"
 #include "ddraw_impl.h"
@@ -101,8 +106,7 @@ void OpenGL1Renderer::PushLights(const SceneLight* lightsArray, size_t count)
 
 	if (ambientLight) {
 		m_lights.push_back(*ambientLight);
-		float avgAmb = (ambientLight->color.r + ambientLight->color.g + ambientLight->color.b) / 3.0f;
-		m_ambientIntensity = std::max(g_debugAmbientLevel, avgAmb);
+		m_ambientIntensity = g_debugAmbientLevel;
 	} else {
 		m_ambientIntensity = g_debugAmbientLevel;
 	}
@@ -745,7 +749,7 @@ void OpenGL1Renderer::SubmitDraw(
 
 #ifdef __DREAMCAST__
 	Appearance litAppearance = appearance;
-	if (g_debugShadingMode > 0 && !mesh.isUnlit) {
+	if (!g_debugDisableLighting && (g_debugShadingMode == 1 || g_debugShadingMode == 2) && !mesh.isUnlit) {
 		// Transform sun direction into model space
 		float lmx, lmy, lmz;
 		bool hasWorld = (worldMatrix[0][0] != 0.0f || worldMatrix[1][1] != 0.0f || worldMatrix[2][2] != 0.0f);
@@ -854,8 +858,19 @@ void OpenGL1Renderer::Clear(float r, float g, float b)
 void OpenGL1Renderer::Flip()
 {
 	SDL_GL_MakeCurrent(DDWindow, m_context);
+#ifdef __DREAMCAST__
+	if (DebugMenu_IsOpen() || g_debugShowFps) {
+		m_dirty = true;
+	}
+#endif
 	if (m_dirty) {
 		{
+#ifdef __DREAMCAST__
+			if (g_debugShowFps) {
+				DebugMenu_RenderFpsOverlay();
+			}
+			DebugMenu_Render();
+#endif
 			DC_ZONE(Z_SWAP);
 			SDL_GL_SwapWindow(DDWindow);
 		}

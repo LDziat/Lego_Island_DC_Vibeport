@@ -376,6 +376,13 @@ extern float g_debugAmbientLevel;
 extern float g_debugSunDirX;
 extern float g_debugSunDirY;
 extern float g_debugSunDirZ;
+extern bool g_debugLowResMode;
+extern float g_debugDrawDistanceScale;
+extern bool g_debugShowFps;
+extern bool g_debugMenuOpen;
+extern bool g_leftTriggerHeld;
+extern int g_dreamcastJoyX;
+extern int g_dreamcastJoyY;
 void InitDebugFlags();
 
 #endif // COMPAT_H

@@ -9,6 +9,7 @@
 #include "mathutils.h"
 #include "miniwin.h"
 #include "dcprof.h"
+#include "compat.h"
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_stdinc.h>
@@ -167,7 +168,7 @@ void Direct3DRMViewportImpl::BuildViewFrustumPlanes()
 
 	// Near and far planes
 	m_frustumPlanes[4] = {{0.0f, 0.0f, 1.0f}, -m_front}; // Near (Z >= m_front)
-	m_frustumPlanes[5] = {{0.0f, 0.0f, -1.0f}, m_back};  // Far  (Z <= m_back)
+	m_frustumPlanes[5] = {{0.0f, 0.0f, -1.0f}, m_back * g_debugDrawDistanceScale};  // Far  (Z <= m_back * scale)
 }
 
 bool IsMeshInFrustum(Direct3DRMMeshImpl* mesh, const D3DRMMATRIX4D& worldViewMatrix, const Plane* frustumPlanes)
@@ -345,23 +346,25 @@ void Direct3DRMViewportImpl::CollectMeshesFromFrame(
 				float distSq = vx * vx + vy * vy + vz * vz;
 
 #ifdef __DREAMCAST__
+				float dScale = g_debugDrawDistanceScale;
+				float dScaleSq = dScale * dScale;
 				// Tier 1: Tiny parts / accessories / small bricks (size < 6): cull beyond 40
-				if (sizeSq < (6.0f * 6.0f) && distSq > (40.0f * 40.0f)) {
+				if (sizeSq < (6.0f * 6.0f) && distSq > (40.0f * 40.0f * dScaleSq)) {
 					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Tier 2: Small props, flowers, minifig parts (size < 18): cull beyond 70
-				if (sizeSq < (18.0f * 18.0f) && distSq > (70.0f * 70.0f)) {
+				if (sizeSq < (18.0f * 18.0f) && distSq > (70.0f * 70.0f * dScaleSq)) {
 					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Tier 3: Medium scenery, trees, streetlamps, vehicles (size < 40): cull beyond 120
-				if (sizeSq < (40.0f * 40.0f) && distSq > (120.0f * 120.0f)) {
+				if (sizeSq < (40.0f * 40.0f) && distSq > (120.0f * 120.0f * dScaleSq)) {
 					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}
 				// Tier 4: Large scenery / buildings (size < 120): cull beyond 220
-				if (sizeSq < (120.0f * 120.0f) && distSq > (220.0f * 220.0f)) {
+				if (sizeSq < (120.0f * 120.0f) && distSq > (220.0f * 220.0f * dScaleSq)) {
 					DC_COUNT(C_DIST_CULLED, 1);
 					continue;
 				}

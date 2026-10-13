@@ -190,6 +190,13 @@ public:
 	LegoTranInfo* GetTranInfo(MxU32 p_index);
 	void FUN_10062770();
 	void PurgeExtra(MxBool p_und);
+	void SetMaxAllowedExtras(MxU32 p_max)
+	{
+		m_maxAllowedExtras = p_max;
+		if (m_numAllowedExtras > p_max) {
+			m_numAllowedExtras = p_max;
+		}
+	}
 	void AddExtra(MxS32 p_location, MxBool p_und);
 	void FUN_10063270(LegoROIList* p_list, LegoAnimPresenter* p_presenter);
 	void FUN_10063780(LegoROIList* p_list);

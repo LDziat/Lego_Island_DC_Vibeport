@@ -791,6 +791,7 @@ if (ISLE_BUILD_APP)
     ISLE/kos_mutex_override.c
     ISLE/islefiles.cpp
     util/debug.cpp
+    util/debugmenu.cpp
     ${CMAKE_SOURCE_DIR}/ISLE/res/arrow_bmp.h
     ${CMAKE_SOURCE_DIR}/ISLE/res/busy_bmp.h
     ${CMAKE_SOURCE_DIR}/ISLE/res/no_bmp.h

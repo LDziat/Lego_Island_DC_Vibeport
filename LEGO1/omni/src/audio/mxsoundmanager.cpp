@@ -80,6 +80,8 @@ void MxSoundManager::Destroy(MxBool p_fromDestructor)
 	if (m_stream) {
 		SDL_DestroyAudioStream(m_stream);
 	}
+#else
+	SDL_CloseAudio();
 #endif
 
 	m_engine.Destroy(ma_engine_uninit);
@@ -134,6 +136,24 @@ MxResult MxSoundManager::Create(MxU32 p_frequencyMS, MxBool p_createThread)
 			SDL_GetError()
 		);
 	}
+#else
+	SDL_AudioSpec desired, obtained;
+	memset(&desired, 0, sizeof(desired));
+	desired.freq = ma_engine_get_sample_rate(m_engine);
+	desired.format = AUDIO_S16SYS;
+	desired.channels = ma_engine_get_channels(m_engine);
+	desired.samples = 1024;
+	desired.callback = AudioStreamCallback;
+	desired.userdata = this;
+
+	if (SDL_OpenAudio(&desired, &obtained) == 0) {
+		SDL_Log("SDL 1.2 Audio opened successfully: freq=%d, channels=%d, samples=%d",
+		        obtained.freq, obtained.channels, obtained.samples);
+		SDL_PauseAudio(0);
+	}
+	else {
+		SDL_LogError(0, "Failed to open SDL audio: %s", SDL_GetError());
+	}
 #endif
 
 	if (p_createThread) {
@@ -182,6 +202,39 @@ void MxSoundManager::AudioStreamCallback(
 		SDL_PutAudioStreamData(manager->m_stream, g_buffer.data(), framesRead * bytesPerFrame);
 	}
 }
+#else
+void MxSoundManager::AudioStreamCallback(void* p_userdata, Uint8* p_stream, int p_len)
+{
+	static vector<float> g_floatBuffer;
+	MxSoundManager* manager = (MxSoundManager*) p_userdata;
+	if (!manager || !manager->m_engine) {
+		memset(p_stream, 0, p_len);
+		return;
+	}
+
+	ma_uint32 channels = ma_engine_get_channels(manager->m_engine);
+	ma_uint32 bytesPerFrame = sizeof(MxS16) * channels;
+	ma_uint32 bufferSizeInFrames = (bytesPerFrame > 0) ? ((ma_uint32) p_len / bytesPerFrame) : 0;
+
+	if (bufferSizeInFrames == 0) {
+		memset(p_stream, 0, p_len);
+		return;
+	}
+
+	if (g_floatBuffer.size() < bufferSizeInFrames * channels) {
+		g_floatBuffer.resize(bufferSizeInFrames * channels);
+	}
+
+	ma_uint64 framesRead = 0;
+	if (ma_engine_read_pcm_frames(manager->m_engine, g_floatBuffer.data(), bufferSizeInFrames, &framesRead) == MA_SUCCESS && framesRead > 0) {
+		ma_pcm_convert(p_stream, ma_format_s16, g_floatBuffer.data(), ma_format_f32, framesRead * channels, ma_dither_mode_none);
+		if (framesRead < bufferSizeInFrames) {
+			memset(p_stream + framesRead * bytesPerFrame, 0, (bufferSizeInFrames - framesRead) * bytesPerFrame);
+		}
+	} else {
+		memset(p_stream, 0, p_len);
+	}
+}
 #endif
 
 // FUNCTION: LEGO1 0x100aeab0
@@ -196,6 +249,10 @@ void MxSoundManager::Destroy()
 void MxSoundManager::SetVolume(MxS32 p_volume)
 {
 	MxAudioManager::SetVolume(p_volume);
+
+	if (m_engine) {
+		ma_engine_set_volume(m_engine, (float) p_volume / 100.0f);
+	}
 
 	ENTER(m_criticalSection);
 

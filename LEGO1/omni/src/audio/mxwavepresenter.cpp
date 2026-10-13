@@ -59,10 +59,6 @@ void MxWavePresenter::Destroy(MxBool p_fromDestructor)
 // FUNCTION: LEGO1 0x100b1bd0
 MxBool MxWavePresenter::WriteToSoundBuffer(void* p_audioPtr, MxU32 p_length)
 {
-#ifdef __DREAMCAST__
-	return TRUE;
-#endif
-
 	if (m_action->IsLooping()) {
 		assert(m_ab.m_offset + p_length <= m_ab.m_length);
 		memcpy(m_ab.m_data + m_ab.m_offset, p_audioPtr, p_length);
@@ -143,11 +139,7 @@ void MxWavePresenter::StartingTickle()
 			);
 
 			m_ab.m_length = ma_get_bytes_per_frame(format, channels) * sizeInFrames;
-#ifdef __DREAMCAST__
-			m_ab.m_data = NULL;
-#else
 			m_ab.m_data = new MxU8[m_ab.m_length];
-#endif
 
 			ma_audio_buffer_config config =
 				ma_audio_buffer_config_init(format, channels, sizeInFrames, m_ab.m_data, NULL);

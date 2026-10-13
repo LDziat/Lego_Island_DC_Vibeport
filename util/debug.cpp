@@ -87,6 +87,13 @@ float g_debugAmbientLevel = 0.38f;
 float g_debugSunDirX = 0.408f;
 float g_debugSunDirY = 0.816f;
 float g_debugSunDirZ = -0.408f;
+bool g_debugLowResMode = false;
+float g_debugDrawDistanceScale = 1.0f;
+bool g_debugShowFps = true;
+bool g_debugMenuOpen = false;
+bool g_leftTriggerHeld = false;
+int g_dreamcastJoyX = 0;
+int g_dreamcastJoyY = 0;
 
 void InitDebugFlags() {
 #ifdef __DREAMCAST__
@@ -115,6 +122,12 @@ void InitDebugFlags() {
             if (szStr) g_debugSunDirZ = (float) atof(szStr + 8);
             char* extStr = strstr(line, "MaxExtras=");
             if (extStr) g_debugMaxExtras = atoi(extStr + 10);
+            char* ddStr = strstr(line, "DrawDist=");
+            if (ddStr) g_debugDrawDistanceScale = (float) atof(ddStr + 9);
+            if (strstr(line, "ShowFps=0")) g_debugShowFps = false;
+            if (strstr(line, "ShowFps=1")) g_debugShowFps = true;
+            if (strstr(line, "LowRes=1")) g_debugLowResMode = true;
+            if (strstr(line, "LowRes=0")) g_debugLowResMode = false;
 #ifdef ISLE_DC_PROFILE
             if (strstr(line, "Profile=0")) g_debugProfile = false;
             if (strstr(line, "Profile=1")) g_debugProfile = true;

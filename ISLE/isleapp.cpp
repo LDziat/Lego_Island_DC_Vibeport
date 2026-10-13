@@ -119,6 +119,9 @@
 
 #ifdef __DREAMCAST__
 #include <malloc.h>
+#include <dc/maple.h>
+#include <dc/maple/controller.h>
+#include "debugmenu.h"
 extern "C" void thd_pass(void);
 extern "C" void glKosInitConfig(void* config);
 extern "C" void glKosInitEx(void* config);
@@ -1093,8 +1096,19 @@ MxResult IsleApp::SetupWindow()
 
 #if defined(MINIWIN)
 	// MINIWIN: window/VESA mode matches the game's rendering resolution.
+#ifdef __DREAMCAST__
+	if (g_debugLowResMode) {
+		g_targetWidth = 320;
+		g_targetHeight = 240;
+	}
+	else {
+		g_targetWidth = m_xRes;
+		g_targetHeight = m_yRes;
+	}
+#else
 	g_targetWidth = m_xRes;
 	g_targetHeight = m_yRes;
+#endif
 #else
 	// DX5: fullscreen uses exclusive resolution for display mode switching.
 	if (m_fullScreen) {
@@ -1656,6 +1670,12 @@ void IsleApp::SetupCursor(Cursor p_cursor)
 		break;
 	}
 
+#ifdef __DREAMCAST__
+	SDL_ShowCursor(0);
+	if (VideoManager()) {
+		VideoManager()->SetCursorBitmap(m_cursorCurrentBitmap);
+	}
+#else
 	if (g_isle->GetDrawCursor()) {
 		VideoManager()->SetCursorBitmap(m_cursorCurrentBitmap);
 	}
@@ -1668,6 +1688,7 @@ void IsleApp::SetupCursor(Cursor p_cursor)
 			SDL_ShowCursor(0);
 		}
 	}
+#endif
 }
 
 SDL_AppResult IsleApp::ParseArguments(int argc, char** argv)
@@ -1811,6 +1832,9 @@ IDirect3DRMMiniwinDevice* GetD3DRMMiniwinDevice()
 
 void IsleApp::MoveVirtualMouseViaJoystick()
 {
+#ifdef __DREAMCAST__
+	return;
+#endif
 	float dpadX = 0.0f;
 	float dpadY = 0.0f;
 
@@ -1893,6 +1917,9 @@ void IsleApp::DetectDoubleTap(const SDL_TouchFingerEvent& p_event)
 #endif
 
 #ifdef __DREAMCAST__
+extern "C" void SDL_DC_EmulateMouse(int);
+extern "C" void SDL_DC_EmulateKeyboard(int);
+
 int main(int argc, char* argv[]) {
 	void* appstate = NULL;
 	if (SDL_AppInit(&appstate, argc, argv) == SDL_APP_FAILURE) {
@@ -1900,61 +1927,108 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	// Disable SDL 1.2 built-in mouse & keyboard emulation to eliminate phantom clicks & motion
+	SDL_DC_EmulateMouse(0);
+	SDL_DC_EmulateKeyboard(0);
+	SDL_ShowCursor(SDL_DISABLE);
+
 	bool running = true;
-#ifdef __DREAMCAST__
 	SDL_Joystick* dc_joy = NULL;
 	if (SDL_NumJoysticks() > 0) {
 		dc_joy = SDL_JoystickOpen(0);
 		SDL_JoystickEventState(SDL_ENABLE);
+		(void) dc_joy;
 	}
 	float dc_mouseX = 320.0f;
 	float dc_mouseY = 240.0f;
-#endif
+	uint32_t prevButtons = 0;
 
 	while (running) {
+		// 1. Maple Controller Direct Polling
+		maple_device_t* cont = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+		if (cont) {
+			cont_state_t* st = (cont_state_t*) maple_dev_status(cont);
+			if (st) {
+				uint32_t pressed = st->buttons & ~prevButtons;
+				prevButtons = st->buttons;
+
+				if (pressed & CONT_START) {
+					DebugMenu_Toggle();
+				}
+				else if (DebugMenu_IsOpen()) {
+					DebugMenu_HandleInput(pressed, st->buttons);
+				}
+				else {
+					g_leftTriggerHeld = (st->ltrig > 30);
+					g_dreamcastJoyX = (abs(st->joyx) > 20) ? st->joyx : 0;
+					g_dreamcastJoyY = (abs(st->joyy) > 20) ? st->joyy : 0;
+
+					bool in3DView = (NavController() != nullptr);
+					if (in3DView && !g_leftTriggerHeld) {
+						// In full 3D island view:
+						// Thumbstick navigates player directly via GetJoystickState().
+						// Cursor remains stationary.
+					}
+					else {
+						// In 2D scenes/menus, or Left Trigger held in 3D:
+						// Thumbstick moves virtual cursor!
+						if (g_dreamcastJoyX != 0 || g_dreamcastJoyY != 0) {
+							dc_mouseX += (g_dreamcastJoyX / 128.0f) * 6.0f;
+							dc_mouseY += (g_dreamcastJoyY / 128.0f) * 6.0f;
+							if (dc_mouseX < 0) dc_mouseX = 0;
+							if (dc_mouseX > 639) dc_mouseX = 639;
+							if (dc_mouseY < 0) dc_mouseY = 0;
+							if (dc_mouseY > 479) dc_mouseY = 479;
+
+							SDL_Event m_evt;
+							m_evt.type = SDL_MOUSEMOTION;
+							m_evt.motion.state = SDL_GetMouseState(NULL, NULL);
+							m_evt.motion.x = (int) dc_mouseX;
+							m_evt.motion.y = (int) dc_mouseY;
+							m_evt.motion.xrel = (int) ((g_dreamcastJoyX / 128.0f) * 6.0f);
+							m_evt.motion.yrel = (int) ((g_dreamcastJoyY / 128.0f) * 6.0f);
+							SDL_AppEvent(appstate, &m_evt);
+						}
+					}
+				}
+			}
+		}
+
+		// 2. SDL Event Queue Processing
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
-			if (SDL_AppEvent(appstate, &event) == SDL_APP_FAILURE) {
-				running = false;
-				break;
+			if (DebugMenu_IsOpen()) {
+				// While debug menu is open, suppress joystick and mouse events from reaching the game
+				if (event.type == SDL_JOYBUTTONDOWN || event.type == SDL_JOYBUTTONUP ||
+				    event.type == SDL_JOYAXISMOTION || event.type == SDL_JOYHATMOTION ||
+				    event.type == SDL_MOUSEMOTION || event.type == SDL_MOUSEBUTTONDOWN ||
+				    event.type == SDL_MOUSEBUTTONUP) {
+					continue;
+				}
 			}
-#ifdef __DREAMCAST__
 			if (event.type == SDL_JOYBUTTONDOWN || event.type == SDL_JOYBUTTONUP) {
+				// Button 3 is START on Dreamcast SDL 1.2 — ignore for mouse click
+				if (event.jbutton.button == 3) {
+					continue;
+				}
 				SDL_Event m_evt;
 				m_evt.type = (event.type == SDL_JOYBUTTONDOWN) ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
 				m_evt.button.button = (event.jbutton.button == 2) ? SDL_BUTTON_LEFT : ((event.jbutton.button == 1) ? SDL_BUTTON_RIGHT : 0);
 				m_evt.button.state = (event.type == SDL_JOYBUTTONDOWN) ? SDL_PRESSED : SDL_RELEASED;
-				m_evt.button.x = (int)dc_mouseX;
-				m_evt.button.y = (int)dc_mouseY;
+				m_evt.button.x = (int) dc_mouseX;
+				m_evt.button.y = (int) dc_mouseY;
 				if (m_evt.button.button != 0) {
 					SDL_AppEvent(appstate, &m_evt);
 				}
+				continue;
 			}
-#endif
-		}
-#ifdef __DREAMCAST__
-		if (dc_joy) {
-			int xAxis = SDL_JoystickGetAxis(dc_joy, 0);
-			int yAxis = SDL_JoystickGetAxis(dc_joy, 1);
-			if (abs(xAxis) > 4000 || abs(yAxis) > 4000) {
-				dc_mouseX += (xAxis / 32768.0f) * 6.0f;
-				dc_mouseY += (yAxis / 32768.0f) * 6.0f;
-				if (dc_mouseX < 0) dc_mouseX = 0;
-				if (dc_mouseX > 639) dc_mouseX = 639;
-				if (dc_mouseY < 0) dc_mouseY = 0;
-				if (dc_mouseY > 479) dc_mouseY = 479;
-				
-				SDL_Event m_evt;
-				m_evt.type = SDL_MOUSEMOTION;
-				m_evt.motion.state = SDL_GetMouseState(NULL, NULL);
-				m_evt.motion.x = (int)dc_mouseX;
-				m_evt.motion.y = (int)dc_mouseY;
-				m_evt.motion.xrel = (int)((xAxis / 32768.0f) * 6.0f);
-				m_evt.motion.yrel = (int)((yAxis / 32768.0f) * 6.0f);
-				SDL_AppEvent(appstate, &m_evt);
+			if (SDL_AppEvent(appstate, &event) == SDL_APP_FAILURE) {
+				running = false;
+				break;
 			}
 		}
-#endif
+
+		// 3. Engine Frame Iteration
 		if (SDL_AppIterate(appstate) == SDL_APP_FAILURE) {
 			running = false;
 		}

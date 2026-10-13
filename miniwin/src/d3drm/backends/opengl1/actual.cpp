@@ -237,8 +237,13 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 {
 	glDisable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glDepthFunc(GL_LEQUAL);
 #ifdef __DREAMCAST__
-	if (g_debugDisableLighting || g_debugShadingMode > 0) {
+	extern int g_targetWidth;
+	extern int g_targetHeight;
+	glViewport(0, 0, g_targetWidth, g_targetHeight);
+	if (g_debugDisableLighting || g_debugShadingMode != 3) {
 		glDisable(GL_LIGHTING);
 		glDisable(GL_COLOR_MATERIAL);
 	} else {
@@ -285,7 +290,7 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 
 #ifdef __DREAMCAST__
 	glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_FALSE);
-	const GLfloat defaultAmbient[4] = {0.25f, 0.25f, 0.25f, 1.0f};
+	const GLfloat defaultAmbient[4] = {g_debugAmbientLevel, g_debugAmbientLevel, g_debugAmbientLevel, 1.0f};
 	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, defaultAmbient);
 #else
 	glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
@@ -301,7 +306,7 @@ void GL11_BeginFrame(const Matrix4x4* projection)
 void GL11_UploadLight(int lightIdx, GL11_BridgeSceneLight* l)
 {
 #ifdef __DREAMCAST__
-	if (g_debugDisableLighting || g_debugShadingMode > 0) {
+	if (g_debugDisableLighting || g_debugShadingMode != 3) {
 		return;
 	}
 #endif
@@ -438,7 +443,7 @@ void GL11_SubmitDraw(
 		s_currentShadeModel = neededShade;
 	}
 
-	bool needTex = (appearance.textureId != NO_TEXTURE_ID && texId != 0xFFFFFFFF && texId != 0);
+	bool needTex = !g_debugDisableTextures && (appearance.textureId != NO_TEXTURE_ID && texId != 0xFFFFFFFF && texId != 0);
 	if (needTex) {
 		if (!s_currentTex2DEnabled) {
 			glEnable(GL_TEXTURE_2D);
@@ -514,6 +519,7 @@ void GL11_Clear(float r, float g, float b)
 {
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
+	glDepthFunc(GL_LEQUAL);
 	glClearColor(r, g, b, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -585,6 +591,9 @@ void GL11_Draw2DImage(
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	glEnable(GL_CULL_FACE);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glDepthFunc(GL_LEQUAL);
 	s_currentBoundTexId = 0xFFFFFFFF;
 	s_currentTex2DEnabled = false;
 	s_currentShadeModel = 0;
